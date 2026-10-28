@@ -35,6 +35,13 @@ import {
   UserCheck,
   Check,
   Sparkles as WandIcon,
+  Lock,
+  Eye,
+  EyeOff,
+  GitBranch,
+  Globe,
+  ShieldCheck,
+  KeyRound,
 } from "lucide-react";
 import {
   ActiveTab,
@@ -102,11 +109,19 @@ import {
   CloudSyncModal,
   syncPushToActiveCloud,
 } from "./components/CloudSyncModal";
+import {
+  GitHubPublishResult,
+  publishProjectToGitHubPagesKsf,
+} from "./services/githubPagesPublisher";
 
 const STORAGE_KEY_RECORDS = "fatsa_adliyesi_kesif_kayitlari_v5";
 const STORAGE_KEY_CLOUD = "fatsa_adliyesi_cloud_config_v2";
 const STORAGE_KEY_DEVICE_IDENTITY = "fatsa_adliyesi_device_identity_v1";
 const STORAGE_KEY_USER_PROFILE = "fatsa_adliyesi_user_profile_v1";
+const STORAGE_KEY_AUTH_SESSION = "fatsa_adliyesi_auth_session_v1";
+const STORAGE_KEY_AUTH_REMEMBER = "fatsa_adliyesi_auth_remember_v1";
+const STORAGE_KEY_PUBLISHED_KSF = "fatsa_adliyesi_published_ksf_v1";
+const REQUIRED_APP_PASSWORD = "Fatsa2.SHM52";
 
 /**
  * Kayıtlarda ada/parsel metin içinde yazılmışsa ayrıştırır (sahte poligon üretmez)
@@ -176,6 +191,42 @@ export default function App() {
 
   const [isCloudModalOpen, setIsCloudModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>("ajanda");
+
+  // Açılış Şifre Koruması ("Fatsa2.SHM52") State
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    try {
+      return (
+        sessionStorage.getItem(STORAGE_KEY_AUTH_SESSION) === "unlocked" ||
+        localStorage.getItem(STORAGE_KEY_AUTH_REMEMBER) === "unlocked"
+      );
+    } catch {
+      return false;
+    }
+  });
+  const [passwordInput, setPasswordInput] = useState<string>("");
+  const [showPassword, setShowPassword] = useState<boolean>(false);
+  const [rememberDeviceAuth, setRememberDeviceAuth] = useState<boolean>(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  // GitHub 'ksf' Repo & GitHub Pages Yayınlama State
+  const [isPublishModalOpen, setIsPublishModalOpen] = useState<boolean>(false);
+  const [publishToken, setPublishToken] = useState<string>(
+    () => cloudConfig.githubToken || ""
+  );
+  const [publishRepoName, setPublishRepoName] = useState<string>("ksf");
+  const [isPublishingKsf, setIsPublishingKsf] = useState<boolean>(false);
+  const [publishProgress, setPublishProgress] = useState<string | null>(null);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [publishResult, setPublishResult] = useState<GitHubPublishResult | null>(
+    () => {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY_PUBLISHED_KSF);
+        return saved ? JSON.parse(saved) : null;
+      } catch {
+        return null;
+      }
+    }
+  );
 
   // 3. State: Weather Forecasts per Inspection ID + Form Preview Weather
   const [weatherMap, setWeatherMap] = useState<Record<string, WeatherForecast>>({});
@@ -1687,6 +1738,188 @@ export default function App() {
     }
   };
 
+  const handleLoginSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (passwordInput.trim() === REQUIRED_APP_PASSWORD) {
+      setIsAuthenticated(true);
+      setAuthError(null);
+      setPasswordInput("");
+      try {
+        sessionStorage.setItem(STORAGE_KEY_AUTH_SESSION, "unlocked");
+        if (rememberDeviceAuth) {
+          localStorage.setItem(STORAGE_KEY_AUTH_REMEMBER, "unlocked");
+        } else {
+          localStorage.removeItem(STORAGE_KEY_AUTH_REMEMBER);
+        }
+      } catch {
+        // ignore
+      }
+    } else {
+      setAuthError(
+        "Hatalı şifre girdiniz. Lütfen mahkeme erişim şifresini kontrol ederek tekrar deneyiniz."
+      );
+    }
+  };
+
+  const handleLockApp = () => {
+    setIsAuthenticated(false);
+    setPasswordInput("");
+    setAuthError(null);
+    try {
+      sessionStorage.removeItem(STORAGE_KEY_AUTH_SESSION);
+      localStorage.removeItem(STORAGE_KEY_AUTH_REMEMBER);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handlePublishToKsfGitHubPages = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const tokenToUse = (publishToken || cloudConfig.githubToken || "").trim();
+    if (!tokenToUse) {
+      setPublishError(
+        "Lütfen GitHub hesabınıza yayınlamak için bir GitHub Personal Access Token (ghp_... veya github_pat_...) giriniz."
+      );
+      return;
+    }
+
+    setIsPublishingKsf(true);
+    setPublishError(null);
+    setPublishProgress("GitHub hesabınıza bağlanılıyor...");
+
+    try {
+      const result = await publishProjectToGitHubPagesKsf(
+        tokenToUse,
+        publishRepoName || "ksf",
+        (stepMsg) => setPublishProgress(stepMsg)
+      );
+      setPublishResult(result);
+      setPublishProgress(null);
+
+      // Token ve repo bilgisini bulut senkronizasyon ayarlarına da kaydet
+      const updatedCloud: CloudSyncConfig = {
+        ...cloudConfig,
+        githubToken: tokenToUse,
+        githubRepo: `${result.owner}/${result.repoName}`,
+      };
+      handleSaveCloudConfig(updatedCloud);
+
+      try {
+        localStorage.setItem(STORAGE_KEY_PUBLISHED_KSF, JSON.stringify(result));
+      } catch {
+        // ignore
+      }
+    } catch (err: any) {
+      setPublishError(
+        err?.message || "GitHub 'ksf' reposuna yayınlama sırasında bir hata oluştu."
+      );
+      setPublishProgress(null);
+    } finally {
+      setIsPublishingKsf(false);
+    }
+  };
+
+  // ============================================================================
+  // AÇILIŞ GÜVENLİK ŞİFRE EKRANI ("Fatsa2.SHM52")
+  // ============================================================================
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen flex flex-col justify-between bg-slate-900 text-slate-100 p-4 sm:p-6">
+        <div className="flex-1 flex items-center justify-center">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-700/80 bg-slate-800/90 shadow-2xl backdrop-blur-md">
+            {/* Kurumsal Başlık Şeridi */}
+            <div className="border-b border-slate-700 bg-slate-950/70 px-6 py-5 text-center space-y-2">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">
+                <ShieldCheck className="h-6 w-6" />
+              </div>
+              <div className="text-[11px] font-bold uppercase tracking-widest text-emerald-400">
+                T.C. FATSA ADLİYESİ · SULH HUKUK MAHKEMESİ
+              </div>
+              <h1 className="text-lg sm:text-xl font-bold text-white tracking-tight">
+                Akıllı Keşif Planlama & CBS Sistemi
+              </h1>
+              <p className="text-xs text-slate-400">
+                Fatsa, Çamaş ve Çatalpınar İlçeleri Yargı Çevresi Güvenli Giriş Kapısı
+              </p>
+            </div>
+
+            {/* Şifre Giriş Formu */}
+            <form onSubmit={handleLoginSubmit} className="p-6 space-y-4">
+              <div>
+                <label
+                  htmlFor="court-password-input"
+                  className="block text-xs font-bold text-slate-200 mb-1.5"
+                >
+                  Mahkeme Erişim Şifresi
+                </label>
+                <div className="relative">
+                  <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    id="court-password-input"
+                    type={showPassword ? "text" : "password"}
+                    autoFocus
+                    value={passwordInput}
+                    onChange={(e) => {
+                      setPasswordInput(e.target.value);
+                      if (authError) setAuthError(null);
+                    }}
+                    placeholder="Erişim şifresini giriniz..."
+                    className="w-full rounded-xl border border-slate-600 bg-slate-900/90 pl-10 pr-10 py-2.5 text-sm font-mono text-white placeholder:text-slate-500 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/20"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                    title={showPassword ? "Şifreyi Gizle" : "Şifreyi Göster"}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {authError && (
+                <div className="rounded-xl border border-rose-500/40 bg-rose-950/50 px-3.5 py-2.5 text-xs font-medium text-rose-200">
+                  {authError}
+                </div>
+              )}
+
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-300 select-none">
+                <input
+                  type="checkbox"
+                  checked={rememberDeviceAuth}
+                  onChange={(e) => setRememberDeviceAuth(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
+                />
+                <span>Bu cihazda oturumu açık tut (Beni hatırla)</span>
+              </label>
+
+              <button
+                type="submit"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-bold text-slate-950 shadow-lg shadow-emerald-500/20 transition-colors hover:bg-emerald-400"
+              >
+                <ShieldCheck className="h-4 w-4" />
+                <span>Sisteme Güvenli Giriş Yap</span>
+              </button>
+
+              <div className="border-t border-slate-700/80 pt-3 flex items-center justify-between text-[11px] text-slate-400">
+                <span>Yetkili Birim: Fatsa Sulh Hukuk Kalemi</span>
+                <span className="font-mono text-emerald-400">CBS v5.2</span>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <footer className="text-center text-xs text-slate-500 py-2">
+          T.C. Fatsa Adliyesi (Fatsa · Çamaş · Çatalpınar) — Yetkisiz erişim güvenlik politikası gereği kısıtlanmıştır.
+        </footer>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900 pb-16 md:pb-0">
       {/* ====================================================================
@@ -1768,20 +2001,35 @@ export default function App() {
           </button>
         </nav>
 
-        {/* Zone 3: User Profile Badge + Cloud Sync */}
-        <div className="flex items-center gap-2 shrink-0">
+        {/* Zone 3: User Profile Badge + GitHub ksf Pages + Cloud Sync + Lock */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <button
             type="button"
             onClick={() => setActiveTab("ayarlar")}
-            className="hidden sm:flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/90 px-2.5 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-white transition-colors"
+            className="hidden xl:flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/90 px-2.5 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-white transition-colors"
             title="Kullanıcı Adı ve Unvan Ayarları"
           >
             <UserCheck className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-            <span className="truncate max-w-[155px]">
+            <span className="truncate max-w-[145px]">
               {userProfile.fullName.trim()
                 ? `${userProfile.fullName} (${userProfile.title})`
                 : `${userProfile.title} · Ayarlar`}
             </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (!publishToken && cloudConfig.githubToken) {
+                setPublishToken(cloudConfig.githubToken);
+              }
+              setIsPublishModalOpen(true);
+            }}
+            className="flex items-center gap-1.5 rounded-lg border border-indigo-400/50 bg-indigo-600 px-2.5 py-1.5 sm:px-3 sm:py-2 text-xs font-semibold text-white transition-colors hover:bg-indigo-500 whitespace-nowrap"
+            title="Projeyi GitHub Hesabınızdaki 'ksf' Reposunda Yayınla (GitHub Pages)"
+          >
+            <Globe className="h-3.5 w-3.5 shrink-0" />
+            <span className="hidden sm:inline">GitHub 'ksf' Yayınla</span>
+            <span className="sm:hidden">ksf Yayın</span>
           </button>
           <button
             onClick={() => setIsCloudModalOpen(true)}
@@ -1790,7 +2038,16 @@ export default function App() {
           >
             <Cloud className="h-4 w-4 shrink-0" />
             <span className="hidden sm:inline">Bulut Senkronizasyon</span>
-            <span className="sm:hidden">Bulut Sync</span>
+            <span className="sm:hidden">Sync</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleLockApp}
+            className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 sm:px-2.5 sm:py-2 text-xs font-semibold text-slate-300 hover:border-rose-400 hover:text-rose-300 transition-colors"
+            title="Oturumu Kilitle (Şifre Ekranına Dön)"
+          >
+            <Lock className="h-3.5 w-3.5 shrink-0" />
+            <span className="hidden lg:inline">Kilitle</span>
           </button>
         </div>
       </header>
@@ -4176,6 +4433,84 @@ export default function App() {
                   GitHub & Google Apps Script Senkronizasyon Ayarlarını Aç
                 </span>
               </button>
+
+              {/* GitHub 'ksf' Repository & GitHub Pages Yayınlama Bölümü */}
+              <div className="border-t border-slate-200 pt-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Globe className="h-5 w-5 text-indigo-600" />
+                  <h3 className="text-sm sm:text-base font-bold text-slate-900">
+                    GitHub &lsquo;ksf&rsquo; Reposunda Yayınla (GitHub Pages)
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Projeyi GitHub hesabınızdaki <strong>ksf</strong> isimli depoya yükler ve <strong>GitHub Pages</strong> özelliğini otomatik aktifleştirerek doğrudan <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[11px]">https://&lt;kullanici&gt;.github.io/ksf/</code> adresinden çalışmasını sağlar.
+                </p>
+
+                {publishResult && (
+                  <div className="rounded-xl border border-emerald-300 bg-emerald-50/90 p-3 text-xs space-y-1.5">
+                    <div className="font-bold text-emerald-950 flex items-center gap-1.5">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                      <span>GitHub &lsquo;{publishResult.repoName}&rsquo; Deposu Yayında!</span>
+                    </div>
+                    <div className="text-[11px] text-slate-700">
+                      <strong>GitHub Pages Adresi:</strong>{" "}
+                      <a
+                        href={publishResult.pagesUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-mono font-bold text-indigo-700 underline hover:text-indigo-900 break-all"
+                      >
+                        {publishResult.pagesUrl}
+                      </a>
+                    </div>
+                    <div className="text-[11px] text-slate-700">
+                      <strong>GitHub Repo:</strong>{" "}
+                      <a
+                        href={publishResult.repoUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-mono text-slate-800 underline hover:text-slate-950 break-all"
+                      >
+                        {publishResult.repoUrl}
+                      </a>
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!publishToken && cloudConfig.githubToken) {
+                      setPublishToken(cloudConfig.githubToken);
+                    }
+                    setIsPublishModalOpen(true);
+                  }}
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-indigo-700 shadow-xs"
+                >
+                  <GitBranch className="h-4 w-4" />
+                  <span>
+                    Projeyi GitHub &lsquo;ksf&rsquo; Reposunda Yayınla (GitHub Pages)
+                  </span>
+                </button>
+              </div>
+
+              {/* Oturum Güvenliği & Şifre Kilitleme */}
+              <div className="border-t border-slate-200 pt-4 flex items-center justify-between gap-2">
+                <div className="text-xs text-slate-600">
+                  <div className="font-bold text-slate-800">Açılış Şifre Koruması Aktif</div>
+                  <div className="text-[11px] text-slate-500">
+                    Giriş Şifresi: <code className="font-mono font-bold text-slate-800">Fatsa2.SHM52</code>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleLockApp}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-800 hover:bg-rose-100"
+                >
+                  <Lock className="h-3.5 w-3.5" />
+                  <span>Ekranı Kilitle</span>
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -4586,6 +4921,181 @@ export default function App() {
           setInspections(newRecords.map(enrichLegacyRecord));
         }}
       />
+
+      {/* ====================================================================
+          GITHUB 'ksf' REPOSITORY & GITHUB PAGES YAYINLAMA MODALI
+         ==================================================================== */}
+      {isPublishModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/65 p-3 sm:p-4 backdrop-blur-xs">
+          <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-900 px-5 py-4 text-white">
+              <div className="flex items-center gap-2.5">
+                <Globe className="h-5 w-5 text-indigo-400 shrink-0" />
+                <div>
+                  <h2 className="text-sm sm:text-base font-bold">
+                    Projeyi GitHub &lsquo;ksf&rsquo; Reposunda Yayınla (GitHub Pages)
+                  </h2>
+                  <p className="text-[11px] text-slate-300">
+                    Tüm proje dosyalarını GitHub hesabınızdaki &lsquo;ksf&rsquo; deposuna yükler ve GitHub Pages&rsquo;i aktif eder
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPublishModalOpen(false)}
+                className="rounded-lg p-1 text-slate-300 hover:bg-slate-800 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handlePublishToKsfGitHubPages} className="p-5 space-y-4">
+              <div className="rounded-xl border border-indigo-200 bg-indigo-50/70 p-3.5 text-xs text-indigo-950 space-y-1.5">
+                <div className="font-bold flex items-center gap-1.5">
+                  <GitBranch className="h-4 w-4 text-indigo-600 shrink-0" />
+                  <span>Tek Tıkla Doğrudan GitHub Pages Yayını</span>
+                </div>
+                <p className="text-[11px] text-slate-700 leading-relaxed">
+                  GitHub Personal Access Token bilginizi girip <strong>&ldquo;ksf Reposunda Yayınla&rdquo;</strong> butonuna tıkladığınızda:
+                </p>
+                <ul className="list-disc pl-4 text-[11px] text-slate-700 space-y-0.5">
+                  <li>
+                    Hesabınızda <strong>ksf</strong> adında repo yoksa otomatik oluşturulur (varsa güncellenir).
+                  </li>
+                  <li>
+                    Açılış şifresi (<code className="font-mono font-bold">Fatsa2.SHM52</code>) dahil tüm uygulama ve derlenmiş paketler yüklenir.
+                  </li>
+                  <li>
+                    <strong>GitHub Pages</strong> otomatik açılarak <code className="font-mono font-bold">https://&lt;kullanici&gt;.github.io/ksf/</code> adresinde doğrudan çalışır.
+                  </li>
+                </ul>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-slate-800 mb-1">
+                    1. GitHub Personal Access Token (repo yetkili) *
+                  </label>
+                  <div className="relative">
+                    <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="password"
+                      value={publishToken}
+                      onChange={(e) => {
+                        setPublishToken(e.target.value);
+                        if (publishError) setPublishError(null);
+                      }}
+                      placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                      className="w-full rounded-lg border border-slate-300 pl-8 pr-3 py-2 text-xs font-mono text-slate-900 focus:border-indigo-600 focus:outline-none"
+                    />
+                  </div>
+                  <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
+                    <span>Classic Token&rsquo;da &lsquo;repo&rsquo; kutucuğu işaretli olmalıdır.</span>
+                    <a
+                      href="https://github.com/settings/tokens/new?description=Fatsa-Kesif-ksf-Pages&scopes=repo,gist,workflow"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 font-semibold text-indigo-600 hover:underline"
+                    >
+                      <span>Token Oluştur</span>
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-800 mb-1">
+                    2. Repo Adı *
+                  </label>
+                  <input
+                    type="text"
+                    value={publishRepoName}
+                    onChange={(e) => setPublishRepoName(e.target.value)}
+                    placeholder="ksf"
+                    className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-mono font-bold text-slate-900 focus:border-indigo-600 focus:bg-white focus:outline-none"
+                  />
+                  <div className="mt-1 text-[10px] text-slate-500">
+                    Varsayılan: <code className="font-mono font-bold">ksf</code>
+                  </div>
+                </div>
+              </div>
+
+              {publishProgress && (
+                <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-3.5 py-2.5 text-xs font-semibold text-indigo-900 flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 animate-spin text-indigo-600 shrink-0" />
+                  <span>{publishProgress}</span>
+                </div>
+              )}
+
+              {publishError && (
+                <div className="rounded-xl border border-rose-300 bg-rose-50 px-3.5 py-2.5 text-xs font-medium text-rose-900">
+                  {publishError}
+                </div>
+              )}
+
+              {publishResult && (
+                <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-4 space-y-2 text-xs">
+                  <div className="flex items-center gap-1.5 font-bold text-emerald-950 text-sm">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                    <span>
+                      Proje &lsquo;{publishResult.owner}/{publishResult.repoName}&rsquo; Reposuna Yayınlandı!
+                    </span>
+                  </div>
+                  <div className="space-y-1 text-slate-700">
+                    <div>
+                      🌐 <strong>Doğrudan Çalışan GitHub Pages Adresi:</strong>{" "}
+                      <a
+                        href={publishResult.pagesUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-mono font-bold text-indigo-700 underline hover:text-indigo-900 break-all"
+                      >
+                        {publishResult.pagesUrl}
+                      </a>
+                    </div>
+                    <div>
+                      📦 <strong>GitHub Kaynak Kodu Deposu:</strong>{" "}
+                      <a
+                        href={publishResult.repoUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-mono text-slate-900 underline break-all"
+                      >
+                        {publishResult.repoUrl}
+                      </a>
+                    </div>
+                    <div className="text-[11px] text-slate-600 pt-1">
+                      Not: GitHub Pages ilk kez etkinleştirildiyse adresin tüm dünyada aktif olması 30-60 saniye sürebilir.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setIsPublishModalOpen(false)}
+                  className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Kapat
+                </button>
+                <button
+                  type="submit"
+                  disabled={isPublishingKsf}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  <Globe className="h-4 w-4" />
+                  <span>
+                    {isPublishingKsf
+                      ? "GitHub 'ksf' Reposuna Yayınlanıyor..."
+                      : "Projeyi 'ksf' Reposunda Yayınla & Pages Aç"}
+                  </span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

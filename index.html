@@ -41,17 +41,37 @@
   <body class="bg-slate-50 text-slate-900 antialiased selection:bg-emerald-500/20 selection:text-emerald-900">
     <div id="root"></div>
     <script>
-      // Bilgisayara indirildikten sonra sunucusuz (doğrudan klasörden file:// ile) açıldığında çalışması için:
-      if (window.location.protocol === 'file:') {
-        var cssLink = document.createElement('link');
-        cssLink.rel = 'stylesheet';
-        cssLink.href = './standalone-bundle.css';
-        document.head.appendChild(cssLink);
+      // Bilgisayara indirildikten sonra (file://) veya GitHub Pages (github.io) kök dizininden doğrudan çalıştırıldığında:
+      (function () {
+        var isFileProtocol = window.location.protocol === 'file:';
+        var isGitHubPages = /\.github\.io$/i.test(window.location.hostname);
 
-        var appScript = document.createElement('script');
-        appScript.src = './standalone-bundle.js';
-        document.body.appendChild(appScript);
-      }
+        function loadStandaloneBundle() {
+          if (window.__fatsaStandaloneLoaded) return;
+          window.__fatsaStandaloneLoaded = true;
+
+          var cssLink = document.createElement('link');
+          cssLink.rel = 'stylesheet';
+          cssLink.href = './standalone-bundle.css';
+          document.head.appendChild(cssLink);
+
+          var appScript = document.createElement('script');
+          appScript.src = './standalone-bundle.js';
+          document.body.appendChild(appScript);
+        }
+
+        if (isFileProtocol) {
+          loadStandaloneBundle();
+        } else {
+          window.addEventListener('DOMContentLoaded', function () {
+            var rawViteScript = document.querySelector('script[src*="/src/main.tsx"]');
+            if (rawViteScript && isGitHubPages) {
+              rawViteScript.removeAttribute('src');
+              loadStandaloneBundle();
+            }
+          });
+        }
+      })();
     </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>

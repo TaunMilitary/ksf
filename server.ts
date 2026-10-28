@@ -12,13 +12,15 @@ const __dirname = path.dirname(__filename);
 
 import http from "http";
 import os from "os";
+import fs from "fs";
+import { execSync } from "child_process";
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
   const httpServer = http.createServer(app);
 
-  app.use(express.json({ limit: "2mb" }));
+  app.use(express.json({ limit: "5mb" }));
 
   // TKGM MEGSİS v3.1 Parcel Proxy (ensures official TKGM headers and avoids browser Referer 403 blocks)
   app.get("/api/tkgm-parsel/:mahalleId/:ada/:parsel", async (req, res) => {
@@ -212,6 +214,295 @@ Lütfen hangi dosyaların hangi sırayla gezilmesi gerektiğini, tahmini zaman t
     } catch (error: unknown) {
       const message =
         error instanceof Error ? error.message : "Senkronizasyon bağlantı hatası";
+      return res.status(500).json({ error: message });
+    }
+  });
+
+  // Publish entire project + standalone bundles to user's GitHub 'ksf' repository and activate GitHub Pages
+  app.post("/api/github-publish-ksf", async (req, res) => {
+    try {
+      const { token, repoName = "ksf" } = req.body || {};
+      const cleanToken = String(token || "").trim();
+      const cleanRepo = String(repoName || "ksf").trim().replace(/^\/+|\/+$/g, "") || "ksf";
+
+      if (!cleanToken) {
+        return res.status(400).json({
+          error:
+            "Lütfen geçerli bir GitHub Personal Access Token (ghp_... veya github_pat_...) giriniz.",
+        });
+      }
+
+      // 1. Ensure standalone-bundle.js is freshly compiled with latest source
+      try {
+        execSync(
+          'npx esbuild src/main.tsx --bundle --format=iife --platform=browser --target=es2020 --minify --define:process.env.NODE_ENV=\'"production"\' --outfile=standalone-bundle.js',
+          { cwd: __dirname, stdio: "ignore" }
+        );
+      } catch {
+        // continue with existing bundle if esbuild fails
+      }
+
+      const ghHeaders: Record<string, string> = {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${cleanToken}`,
+        "Content-Type": "application/json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "Fatsa-Adliyesi-Kesif-Planlayici",
+      };
+
+      // 2. Verify GitHub user
+      const userRes = await fetch("https://api.github.com/user", {
+        headers: ghHeaders,
+      });
+      if (!userRes.ok) {
+        const errData = await userRes.json().catch(() => ({}));
+        return res.status(userRes.status).json({
+          error: `GitHub kimlik doğrulaması başarısız (HTTP ${userRes.status}): ${
+            (errData as any)?.message || "Token geçersiz veya 'repo' yetkisi eksik."
+          }`,
+        });
+      }
+      const userData = (await userRes.json()) as { login: string };
+      const owner = userData.login;
+      const pagesUrl = `https://${owner}.github.io/${cleanRepo}/`;
+      const repoUrl = `https://github.com/${owner}/${cleanRepo}`;
+
+      // 3. Check or create 'ksf' repository
+      let defaultBranch = "main";
+      const repoCheckRes = await fetch(
+        `https://api.github.com/repos/${owner}/${cleanRepo}`,
+        { headers: ghHeaders }
+      );
+
+      if (repoCheckRes.status === 404) {
+        const createRes = await fetch("https://api.github.com/user/repos", {
+          method: "POST",
+          headers: ghHeaders,
+          body: JSON.stringify({
+            name: cleanRepo,
+            description:
+              "T.C. Fatsa Sulh Hukuk Mahkemesi (Fatsa, Çamaş, Çatalpınar) Akıllı Keşif Planlama ve CBS Sistemi",
+            homepage: pagesUrl,
+            private: false,
+            has_pages: true,
+            auto_init: true,
+          }),
+        });
+        if (!createRes.ok) {
+          const errData = await createRes.json().catch(() => ({}));
+          return res.status(createRes.status).json({
+            error: `'${cleanRepo}' deposu oluşturulamadı (HTTP ${createRes.status}): ${
+              (errData as any)?.message ||
+              "Token'da 'repo' (Classic) veya Repository Administration izni açık olmalıdır."
+            }`,
+          });
+        }
+        const created = (await createRes.json()) as { default_branch?: string };
+        defaultBranch = created.default_branch || "main";
+        await new Promise((r) => setTimeout(r, 1500));
+      } else if (repoCheckRes.ok) {
+        const existing = (await repoCheckRes.json()) as {
+          default_branch?: string;
+          private?: boolean;
+        };
+        defaultBranch = existing.default_branch || "main";
+        if (existing.private) {
+          await fetch(`https://api.github.com/repos/${owner}/${cleanRepo}`, {
+            method: "PATCH",
+            headers: ghHeaders,
+            body: JSON.stringify({ private: false, homepage: pagesUrl }),
+          }).catch(() => {});
+        }
+      } else {
+        const errData = await repoCheckRes.json().catch(() => ({}));
+        return res.status(repoCheckRes.status).json({
+          error: `Repo kontrol hatası: ${(errData as any)?.message || "Bilinmeyen hata"}`,
+        });
+      }
+
+      // 4. Collect project files from disk
+      const filesToPush: { path: string; content: string }[] = [
+        { path: ".nojekyll", content: "" },
+        {
+          path: "README.md",
+          content: `# T.C. Fatsa Sulh Hukuk Mahkemesi — Akıllı Keşif Planlama ve CBS Sistemi\n\nOrdu İli **Fatsa, Çamaş ve Çatalpınar** ilçeleri Sulh Hukuk Mahkemesi keşif planlama, TKGM Ada/Parsel sınır sorgulama ve güzergah optimizasyon sistemi.\n\n- 🌐 **Canlı Uygulama (GitHub Pages):** [${pagesUrl}](${pagesUrl})\n- 🔒 **Açılış Güvenlik Şifresi:** Kurum içi şifre korumalıdır.\n`,
+        },
+      ];
+
+      const collectDir = (relDir: string) => {
+        const absDir = path.join(__dirname, relDir);
+        if (!fs.existsSync(absDir)) return;
+        const entries = fs.readdirSync(absDir, { withFileTypes: true });
+        for (const entry of entries) {
+          const relPath = relDir ? `${relDir}/${entry.name}` : entry.name;
+          if (
+            entry.name === "node_modules" ||
+            entry.name === ".git" ||
+            entry.name === "dist" ||
+            entry.name === ".env" ||
+            entry.name.endsWith(".log")
+          ) {
+            continue;
+          }
+          if (entry.isDirectory()) {
+            collectDir(relPath);
+          } else if (entry.isFile()) {
+            try {
+              const content = fs.readFileSync(
+                path.join(__dirname, relPath),
+                "utf-8"
+              );
+              filesToPush.push({ path: relPath, content });
+            } catch {
+              // ignore binary
+            }
+          }
+        }
+      };
+
+      collectDir("");
+
+      // 5. Get latest commit SHA on defaultBranch
+      let latestCommitSha = "";
+      let baseTreeSha = "";
+      const refRes = await fetch(
+        `https://api.github.com/repos/${owner}/${cleanRepo}/git/ref/heads/${defaultBranch}`,
+        { headers: ghHeaders }
+      );
+      if (refRes.ok) {
+        const refData = (await refRes.json()) as { object?: { sha?: string } };
+        latestCommitSha = refData.object?.sha || "";
+        if (latestCommitSha) {
+          const commitRes = await fetch(
+            `https://api.github.com/repos/${owner}/${cleanRepo}/git/commits/${latestCommitSha}`,
+            { headers: ghHeaders }
+          );
+          if (commitRes.ok) {
+            const commitData = (await commitRes.json()) as {
+              tree?: { sha?: string };
+            };
+            baseTreeSha = commitData.tree?.sha || "";
+          }
+        }
+      }
+
+      // 6. Create Git Tree with all project & standalone files
+      const treeItems = filesToPush.map((f) => ({
+        path: f.path,
+        mode: "100644",
+        type: "blob",
+        content: f.content,
+      }));
+
+      const createTreeRes = await fetch(
+        `https://api.github.com/repos/${owner}/${cleanRepo}/git/trees`,
+        {
+          method: "POST",
+          headers: ghHeaders,
+          body: JSON.stringify(
+            baseTreeSha
+              ? { base_tree: baseTreeSha, tree: treeItems }
+              : { tree: treeItems }
+          ),
+        }
+      );
+
+      if (!createTreeRes.ok) {
+        const errData = await createTreeRes.json().catch(() => ({}));
+        return res.status(createTreeRes.status).json({
+          error: `Git ağacı oluşturulamadı: ${(errData as any)?.message || "Hata"}`,
+        });
+      }
+      const treeData = (await createTreeRes.json()) as { sha: string };
+
+      // 7. Create Commit & Update Branch Reference
+      const createCommitRes = await fetch(
+        `https://api.github.com/repos/${owner}/${cleanRepo}/git/commits`,
+        {
+          method: "POST",
+          headers: ghHeaders,
+          body: JSON.stringify({
+            message: `Fatsa Sulh Hukuk Keşif Planlayıcı - GitHub Pages Yayını (${new Date().toLocaleString("tr-TR")})`,
+            tree: treeData.sha,
+            parents: latestCommitSha ? [latestCommitSha] : [],
+          }),
+        }
+      );
+      if (!createCommitRes.ok) {
+        const errData = await createCommitRes.json().catch(() => ({}));
+        return res.status(createCommitRes.status).json({
+          error: `Commit oluşturulamadı: ${(errData as any)?.message || "Hata"}`,
+        });
+      }
+      const newCommit = (await createCommitRes.json()) as { sha: string };
+
+      await fetch(
+        `https://api.github.com/repos/${owner}/${cleanRepo}/git/refs/heads/${defaultBranch}`,
+        {
+          method: "PATCH",
+          headers: ghHeaders,
+          body: JSON.stringify({
+            sha: newCommit.sha,
+            force: true,
+          }),
+        }
+      );
+
+      // 8. Activate GitHub Pages on 'ksf' repo (branch: defaultBranch, path: "/")
+      let pagesStatus = "Aktif (GitHub Pages)";
+      try {
+        const pagesPostRes = await fetch(
+          `https://api.github.com/repos/${owner}/${cleanRepo}/pages`,
+          {
+            method: "POST",
+            headers: ghHeaders,
+            body: JSON.stringify({
+              source: {
+                branch: defaultBranch,
+                path: "/",
+              },
+            }),
+          }
+        );
+        if (pagesPostRes.status === 409) {
+          await fetch(
+            `https://api.github.com/repos/${owner}/${cleanRepo}/pages`,
+            {
+              method: "PUT",
+              headers: ghHeaders,
+              body: JSON.stringify({
+                source: {
+                  branch: defaultBranch,
+                  path: "/",
+                },
+              }),
+            }
+          ).catch(() => {});
+          await fetch(
+            `https://api.github.com/repos/${owner}/${cleanRepo}/pages/builds`,
+            {
+              method: "POST",
+              headers: ghHeaders,
+            }
+          ).catch(() => {});
+        }
+      } catch {
+        pagesStatus = "Repo yüklendi (Settings > Pages altından kontrol edilebilir)";
+      }
+
+      return res.json({
+        success: true,
+        owner,
+        repoName: cleanRepo,
+        repoUrl,
+        pagesUrl,
+        branch: defaultBranch,
+        filesCount: filesToPush.length,
+        pagesStatus,
+      });
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "GitHub yayınlama hatası";
       return res.status(500).json({ error: message });
     }
   });
