@@ -1,0 +1,6 @@
+{
+  "name": "Fatsa Adliyesi Akıllı Keşif Planlayıcı",
+  "description": "Ordu ili Fatsa Adliyesi Sulh Hukuk Mahkemesi kalem personeli ve hakimler için konum, mesafe, güzergah optimizasyonu ve bulut senkronizasyonu destekli akıllı keşif planlama sistemi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
