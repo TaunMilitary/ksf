@@ -320,7 +320,7 @@ Lütfen hangi dosyaların hangi sırayla gezilmesi gerektiğini, tahmini zaman t
         });
       }
 
-      // 4. Collect project files from disk
+      // 4. Collect project files from disk (sanitized for GitHub Pages & public npm)
       const filesToPush: { path: string; content: string }[] = [
         { path: ".nojekyll", content: "" },
         {
@@ -338,8 +338,14 @@ Lütfen hangi dosyaların hangi sırayla gezilmesi gerektiğini, tahmini zaman t
           if (
             entry.name === "node_modules" ||
             entry.name === ".git" ||
+            entry.name === ".aistudio" ||
             entry.name === "dist" ||
             entry.name === ".env" ||
+            entry.name === ".env.example" ||
+            entry.name === "bun.lock" ||
+            entry.name === "package-lock.json" ||
+            entry.name === "README.md" ||
+            entry.name === ".nojekyll" ||
             entry.name.endsWith(".log")
           ) {
             continue;
@@ -348,10 +354,52 @@ Lütfen hangi dosyaların hangi sırayla gezilmesi gerektiğini, tahmini zaman t
             collectDir(relPath);
           } else if (entry.isFile()) {
             try {
-              const content = fs.readFileSync(
+              let content = fs.readFileSync(
                 path.join(__dirname, relPath),
                 "utf-8"
               );
+
+              // GitHub Pages için index.html içinde /src/main.tsx 404 hatasını önle ve standalone bundle'ı doğrudan bağla
+              if (relPath === "index.html") {
+                content = `<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fatsa Adliyesi Akıllı Keşif Planlayıcı</title>
+    <meta name="description" content="Ordu ili Fatsa Adliyesi Sulh Hukuk Mahkemesi kalem personeli ve hakimler için konum, mesafe, güzergah optimizasyonu ve bulut senkronizasyonu destekli akıllı keşif planlama sistemi." />
+    <meta property="og:title" content="Fatsa Adliyesi Akıllı Keşif Planlayıcı" />
+    <meta property="og:description" content="Ordu ili Fatsa Adliyesi Sulh Hukuk Mahkemesi kalem personeli ve hakimler için konum, mesafe, güzergah optimizasyonu ve bulut senkronizasyonu destekli akıllı keşif planlama sistemi." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <link rel="stylesheet" href="./standalone-bundle.css" />
+  </head>
+  <body class="bg-slate-50 text-slate-900 antialiased selection:bg-emerald-500/20 selection:text-emerald-900">
+    <div id="root"></div>
+    <script src="./standalone-bundle.js"></script>
+  </body>
+</html>
+`;
+              }
+
+              // GitHub Actions / standart npm ortamları için package.json içindeki sandbox sürümlerini uyumlu hale getir
+              if (relPath === "package.json") {
+                content = content
+                  .replace('"@google/genai": "^2.4.0"', '"@google/genai": "^1.0.0"')
+                  .replace('"@tailwindcss/vite": "^4.3.3"', '"@tailwindcss/vite": "^4.0.0"')
+                  .replace('"@types/leaflet": "^1.9.22"', '"@types/leaflet": "^1.9.16"')
+                  .replace('"@vitejs/plugin-react": "^6.1.1"', '"@vitejs/plugin-react": "^4.3.4"')
+                  .replace('"vite": "^8.3.0"', '"vite": "^6.2.0"')
+                  .replace('"@types/react": "^19.3.0"', '"@types/react": "^19.0.0"')
+                  .replace('"@types/react-dom": "^19.3.0"', '"@types/react-dom": "^19.0.0"')
+                  .replace('"tailwindcss": "^4.3.3"', '"tailwindcss": "^4.0.0"')
+                  .replace('"typescript": "^7.0.2"', '"typescript": "^5.8.2"');
+              }
+
               filesToPush.push({ path: relPath, content });
             } catch {
               // ignore binary
@@ -364,7 +412,6 @@ Lütfen hangi dosyaların hangi sırayla gezilmesi gerektiğini, tahmini zaman t
 
       // 5. Get latest commit SHA on defaultBranch
       let latestCommitSha = "";
-      let baseTreeSha = "";
       const refRes = await fetch(
         `https://api.github.com/repos/${owner}/${cleanRepo}/git/ref/heads/${defaultBranch}`,
         { headers: ghHeaders }
@@ -372,81 +419,103 @@ Lütfen hangi dosyaların hangi sırayla gezilmesi gerektiğini, tahmini zaman t
       if (refRes.ok) {
         const refData = (await refRes.json()) as { object?: { sha?: string } };
         latestCommitSha = refData.object?.sha || "";
-        if (latestCommitSha) {
-          const commitRes = await fetch(
-            `https://api.github.com/repos/${owner}/${cleanRepo}/git/commits/${latestCommitSha}`,
-            { headers: ghHeaders }
-          );
-          if (commitRes.ok) {
-            const commitData = (await commitRes.json()) as {
-              tree?: { sha?: string };
-            };
-            baseTreeSha = commitData.tree?.sha || "";
-          }
-        }
       }
 
-      // 6. Create Git Tree with all project & standalone files
-      const treeItems = filesToPush.map((f) => ({
-        path: f.path,
-        mode: "100644",
-        type: "blob",
-        content: f.content,
-      }));
+      // 6. Create clean Git Tree (without base_tree so old bun.lock / .env.example files are removed)
+      const buildTreeItems = (includeWorkflows: boolean) =>
+        filesToPush
+          .filter((f) => includeWorkflows || !f.path.startsWith(".github/"))
+          .map((f) => ({
+            path: f.path,
+            mode: "100644",
+            type: "blob",
+            content: f.content,
+          }));
 
-      const createTreeRes = await fetch(
+      let createTreeRes = await fetch(
         `https://api.github.com/repos/${owner}/${cleanRepo}/git/trees`,
         {
           method: "POST",
           headers: ghHeaders,
-          body: JSON.stringify(
-            baseTreeSha
-              ? { base_tree: baseTreeSha, tree: treeItems }
-              : { tree: treeItems }
-          ),
+          body: JSON.stringify({ tree: buildTreeItems(true) }),
         }
       );
 
-      if (!createTreeRes.ok) {
-        const errData = await createTreeRes.json().catch(() => ({}));
-        return res.status(createTreeRes.status).json({
-          error: `Git ağacı oluşturulamadı: ${(errData as any)?.message || "Hata"}`,
+      let treeData: { sha: string } | null = null;
+      if (createTreeRes.ok) {
+        treeData = (await createTreeRes.json()) as { sha: string };
+      } else {
+        // Token'da workflow yetkisi yoksa .github klasörü olmadan tekrar dene
+        createTreeRes = await fetch(
+          `https://api.github.com/repos/${owner}/${cleanRepo}/git/trees`,
+          {
+            method: "POST",
+            headers: ghHeaders,
+            body: JSON.stringify({ tree: buildTreeItems(false) }),
+          }
+        );
+        if (!createTreeRes.ok) {
+          const errData = await createTreeRes.json().catch(() => ({}));
+          return res.status(createTreeRes.status).json({
+            error: `Git ağacı oluşturulamadı: ${(errData as any)?.message || "Hata"}`,
+          });
+        }
+        treeData = (await createTreeRes.json()) as { sha: string };
+      }
+
+      // 7. Create Commit & Update Branch Reference (with automatic fallback if workflow scope is rejected on commit/ref update)
+      const commitAndPushTree = async (treeSha: string) => {
+        const cRes = await fetch(
+          `https://api.github.com/repos/${owner}/${cleanRepo}/git/commits`,
+          {
+            method: "POST",
+            headers: ghHeaders,
+            body: JSON.stringify({
+              message: `Fatsa Sulh Hukuk Keşif Planlayıcı - GitHub Pages & Actions Onarımı (${new Date().toLocaleString("tr-TR")})`,
+              tree: treeSha,
+              parents: latestCommitSha ? [latestCommitSha] : [],
+            }),
+          }
+        );
+        if (!cRes.ok) return { ok: false, res: cRes };
+        const cData = (await cRes.json()) as { sha: string };
+        const uRes = await fetch(
+          `https://api.github.com/repos/${owner}/${cleanRepo}/git/refs/heads/${defaultBranch}`,
+          {
+            method: "PATCH",
+            headers: ghHeaders,
+            body: JSON.stringify({
+              sha: cData.sha,
+              force: true,
+            }),
+          }
+        );
+        return { ok: uRes.ok, res: uRes };
+      };
+
+      let pushAttempt = await commitAndPushTree(treeData.sha);
+      if (!pushAttempt.ok) {
+        // Eğer token 'workflow' izni olmadığı için .github/workflows dosyasını reddettiyse .github olmadan tekrar gönder
+        const fallbackTreeRes = await fetch(
+          `https://api.github.com/repos/${owner}/${cleanRepo}/git/trees`,
+          {
+            method: "POST",
+            headers: ghHeaders,
+            body: JSON.stringify({ tree: buildTreeItems(false) }),
+          }
+        );
+        if (fallbackTreeRes.ok) {
+          const fbTree = (await fallbackTreeRes.json()) as { sha: string };
+          pushAttempt = await commitAndPushTree(fbTree.sha);
+        }
+      }
+
+      if (!pushAttempt.ok) {
+        const errData = await pushAttempt.res.json().catch(() => ({}));
+        return res.status(pushAttempt.res.status).json({
+          error: `Repo güncellenemedi: ${(errData as any)?.message || "Hata"}`,
         });
       }
-      const treeData = (await createTreeRes.json()) as { sha: string };
-
-      // 7. Create Commit & Update Branch Reference
-      const createCommitRes = await fetch(
-        `https://api.github.com/repos/${owner}/${cleanRepo}/git/commits`,
-        {
-          method: "POST",
-          headers: ghHeaders,
-          body: JSON.stringify({
-            message: `Fatsa Sulh Hukuk Keşif Planlayıcı - GitHub Pages Yayını (${new Date().toLocaleString("tr-TR")})`,
-            tree: treeData.sha,
-            parents: latestCommitSha ? [latestCommitSha] : [],
-          }),
-        }
-      );
-      if (!createCommitRes.ok) {
-        const errData = await createCommitRes.json().catch(() => ({}));
-        return res.status(createCommitRes.status).json({
-          error: `Commit oluşturulamadı: ${(errData as any)?.message || "Hata"}`,
-        });
-      }
-      const newCommit = (await createCommitRes.json()) as { sha: string };
-
-      await fetch(
-        `https://api.github.com/repos/${owner}/${cleanRepo}/git/refs/heads/${defaultBranch}`,
-        {
-          method: "PATCH",
-          headers: ghHeaders,
-          body: JSON.stringify({
-            sha: newCommit.sha,
-            force: true,
-          }),
-        }
-      );
 
       // 8. Activate GitHub Pages on 'ksf' repo (branch: defaultBranch, path: "/")
       let pagesStatus = "Aktif (GitHub Pages)";

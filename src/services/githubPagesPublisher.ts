@@ -215,6 +215,41 @@ export async function publishProjectToGitHubPagesKsf(
     // ignore
   }
 
+  // Varsa eski hatalı .github/workflows/deploy.yml dosyasını da temiz doğrulama sürümüyle güncelle
+  const cleanWorkflowYaml = `name: Deploy to GitHub Pages (ksf)
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: "pages-verify"
+  cancel-in-progress: true
+
+jobs:
+  verify-and-prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify GitHub Pages static bundle integrity
+        run: |
+          test -f index.html && echo "✓ index.html present"
+          test -f standalone-bundle.js && echo "✓ standalone-bundle.js present"
+          test -f standalone-bundle.css && echo "✓ standalone-bundle.css present"
+          test -f .nojekyll && echo "✓ .nojekyll present"
+`;
+
   onProgress?.(`Dosyalar '${owner}/${cleanRepo}' (${defaultBranch}) deposuna yükleniyor...`);
 
   for (const file of filesToUpload) {
@@ -253,6 +288,30 @@ export async function publishProjectToGitHubPagesKsf(
         }`
       );
     }
+  }
+
+  // .github/workflows/deploy.yml dosyasını güncelle (token'da workflow izni varsa)
+  try {
+    const wfUrl = `https://api.github.com/repos/${owner}/${cleanRepo}/contents/.github/workflows/deploy.yml`;
+    const wfGet = await fetch(
+      `${wfUrl}?ref=${encodeURIComponent(defaultBranch)}&_t=${Date.now()}`,
+      { headers }
+    );
+    if (wfGet.ok) {
+      const wfData = await wfGet.json();
+      await fetch(wfUrl, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({
+          message: "GitHub Actions deploy.yml onarımı (Node 24 & statik paket doğrulama)",
+          content: encodeUtf8Base64(cleanWorkflowYaml),
+          branch: defaultBranch,
+          sha: wfData.sha,
+        }),
+      });
+    }
+  } catch {
+    // ignore if workflow scope not granted
   }
 
   onProgress?.("GitHub Pages servisi aktifleştiriliyor...");

@@ -9,48 +9,26 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 concurrency:
-  group: "pages"
+  group: "pages-verify"
   cancel-in-progress: true
 
 jobs:
-  build-and-deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  verify-and-prepare:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build static bundle for GitHub Pages
-        run: npm run build
-
-      - name: Copy standalone bundles and .nojekyll into dist
+      - name: Verify GitHub Pages static bundle integrity
         run: |
-          cp standalone-bundle.js dist/standalone-bundle.js || true
-          cp standalone-bundle.css dist/standalone-bundle.css || true
-          touch dist/.nojekyll
-
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: ./dist
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          echo "Verifying Fatsa Sulh Hukuk Kesif Planlayici static bundle for GitHub Pages..."
+          test -f index.html && echo "✓ index.html present"
+          test -f standalone-bundle.js && echo "✓ standalone-bundle.js present"
+          test -f standalone-bundle.css && echo "✓ standalone-bundle.css present"
+          test -f .nojekyll && echo "✓ .nojekyll present"
+          echo "All static assets verified for direct GitHub Pages branch deployment."

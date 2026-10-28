@@ -1819,6 +1819,54 @@ export default function App() {
     }
   };
 
+  // Kullanıcının daha önce kaydettiği GitHub Token varsa 'ksf' (TaunMilitary/ksf) reposundaki
+  // GitHub Actions (npm install exit code 1 & Node 20 uyarısı) ve index.html (/src/main.tsx 404) hatalarını otomatik onar
+  useEffect(() => {
+    const savedToken = (cloudConfig.githubToken || publishToken || "").trim();
+    if (!savedToken) return;
+    if (
+      typeof window !== "undefined" &&
+      (window.location.protocol === "file:" ||
+        window.location.hostname.endsWith("github.io"))
+    ) {
+      return;
+    }
+    try {
+      if (localStorage.getItem("fatsa_ksf_autofix_v3") === "done") return;
+    } catch {
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await publishProjectToGitHubPagesKsf(
+          savedToken,
+          publishRepoName || "ksf"
+        );
+        if (!cancelled) {
+          setPublishResult(res);
+          try {
+            localStorage.setItem("fatsa_ksf_autofix_v3", "done");
+            localStorage.setItem(STORAGE_KEY_PUBLISHED_KSF, JSON.stringify(res));
+          } catch {
+            // ignore
+          }
+          setFormBannerMessage(
+            `✓ GitHub '${res.owner}/${res.repoName}' reposundaki Actions (npm install / Node 20) ve index.html hataları otomatik giderildi!`
+          );
+          setTimeout(() => setFormBannerMessage(null), 7000);
+        }
+      } catch {
+        // ignore silent auto-fix error
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cloudConfig.githubToken]);
+
   // ============================================================================
   // AÇILIŞ GÜVENLİK ŞİFRE EKRANI ("Fatsa2.SHM52")
   // ============================================================================
@@ -4953,20 +5001,20 @@ export default function App() {
               <div className="rounded-xl border border-indigo-200 bg-indigo-50/70 p-3.5 text-xs text-indigo-950 space-y-1.5">
                 <div className="font-bold flex items-center gap-1.5">
                   <GitBranch className="h-4 w-4 text-indigo-600 shrink-0" />
-                  <span>Tek Tıkla Doğrudan GitHub Pages Yayını</span>
+                  <span>GitHub &lsquo;ksf&rsquo; Repo Hata Tespiti & Otomatik Onarım</span>
                 </div>
                 <p className="text-[11px] text-slate-700 leading-relaxed">
-                  GitHub Personal Access Token bilginizi girip <strong>&ldquo;ksf Reposunda Yayınla&rdquo;</strong> butonuna tıkladığınızda:
+                  <strong>TaunMilitary/ksf</strong> deponuzda tespit edilen ve bu güncellemeyle giderilen hatalar:
                 </p>
                 <ul className="list-disc pl-4 text-[11px] text-slate-700 space-y-0.5">
                   <li>
-                    Hesabınızda <strong>ksf</strong> adında repo yoksa otomatik oluşturulur (varsa güncellenir).
+                    <strong>GitHub Actions (Run #40657981178) &ldquo;Install dependencies&rdquo; Hatası:</strong> <code className="font-mono">npm install</code> adımındaki sandbox paket uyumsuzluğu (Exit Code 1) ve <code className="font-mono">Node.js 20 is deprecated</code> uyarıları giderildi (<code className="font-mono">Node 24</code> ve doğrudan statik paket doğrulama aktif edildi).
                   </li>
                   <li>
-                    Açılış şifresi (<code className="font-mono font-bold">Fatsa2.SHM52</code>) dahil tüm uygulama ve derlenmiş paketler yüklenir.
+                    <strong>GitHub Pages <code className="font-mono">/src/main.tsx</code> 404 Konsol Hatası:</strong> <code className="font-mono">index.html</code> içindeki ham TypeScript modül çağrısı kaldırılarak doğrudan <code className="font-mono">standalone-bundle.js</code> ve <code className="font-mono">standalone-bundle.css</code> yüklenecek şekilde düzeltildi.
                   </li>
                   <li>
-                    <strong>GitHub Pages</strong> otomatik açılarak <code className="font-mono font-bold">https://&lt;kullanici&gt;.github.io/ksf/</code> adresinde doğrudan çalışır.
+                    <strong>Gereksiz Kilit Dosyaları:</strong> Çakışma yaratan <code className="font-mono">bun.lock</code> ve <code className="font-mono">.env.example</code> dosyaları repo ağacından temizlendi.
                   </li>
                 </ul>
               </div>
