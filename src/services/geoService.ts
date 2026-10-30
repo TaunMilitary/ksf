@@ -1479,12 +1479,13 @@ export async function fetchNearbyTkgmParcels(params: {
 }
 
 /**
- * Kaydın Ada / Parsel bilgisini (çoklu parsel desteğiyle) okunaklı etiket olarak döndürür
+ * Kaydın Ada / Parsel ve varsa Bağımsız Bölüm No bilgisini (çoklu parsel desteğiyle) okunaklı etiket olarak döndürür
  */
 export function formatAdaParselLabel(rec: {
   subjectType?: "tasinmaz" | "arac";
   adaNo?: string;
   parselNo?: string;
+  bagimsizBolumNo?: string;
   nitelik?: string;
   yuzolcumuM2?: number;
   parcels?: ParcelItem[];
@@ -1493,16 +1494,30 @@ export function formatAdaParselLabel(rec: {
   if (rec.parcels && rec.parcels.length > 1) {
     const shortList = rec.parcels
       .slice(0, 3)
-      .map((p) => `${p.adaNo || "0"}/${p.parselNo}`)
+      .map((p) => {
+        const bb = p.bagimsizBolumNo?.trim()
+          ? ` (B.Bölüm: ${p.bagimsizBolumNo.trim()})`
+          : "";
+        return `${p.adaNo || "0"}/${p.parselNo}${bb}`;
+      })
       .join(", ");
     const extra =
       rec.parcels.length > 3 ? ` +${rec.parcels.length - 3}` : "";
     return `${rec.parcels.length} Parsel (${shortList}${extra})`;
   }
-  if (!rec.adaNo && !rec.parselNo) return null;
-  const adaPart = rec.adaNo ? `${rec.adaNo} Ada` : "0 Ada";
-  const parselPart = rec.parselNo ? `${rec.parselNo} Parsel` : "";
-  return `${adaPart} ${parselPart}`.trim();
+  const singleParcel = rec.parcels?.[0];
+  const adaVal = rec.adaNo || singleParcel?.adaNo;
+  const parselVal = rec.parselNo || singleParcel?.parselNo;
+  const bbVal = (
+    rec.bagimsizBolumNo ||
+    singleParcel?.bagimsizBolumNo ||
+    ""
+  ).trim();
+  if (!adaVal && !parselVal) return null;
+  const adaPart = adaVal ? `${adaVal} Ada` : "0 Ada";
+  const parselPart = parselVal ? `${parselVal} Parsel` : "";
+  const bbPart = bbVal ? ` · Bağımsız Bölüm No: ${bbVal}` : "";
+  return `${adaPart} ${parselPart}${bbPart}`.trim();
 }
 
 /**

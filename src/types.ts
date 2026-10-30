@@ -39,6 +39,7 @@ export interface ParcelItem {
   neighborhood?: string;
   adaNo: string;
   parselNo: string;
+  bagimsizBolumNo?: string; // Örn: "4", "Zemin Kat No: 2" (Keşif Ajandası ve Bilirkişi paylaşımı için)
   nitelik?: string;
   yuzolcumuM2?: number;
   paftaNo?: string;
@@ -84,6 +85,7 @@ export interface InspectionRecord {
   subjectType?: InspectionSubjectType; // "tasinmaz" (varsayılan) | "arac" (delil tespiti araç hasar)
   adaNo?: string; // Örn: "2058" (1. parsel veya tek parsel)
   parselNo?: string; // Örn: "1" (1. parsel veya tek parsel)
+  bagimsizBolumNo?: string; // Örn: "3" (1. parsel veya tek parsel için Bağımsız Bölüm No)
   nitelik?: string; // Örn: "Fındık Bahçesi", "Arsa ve Kâgir Ev", "Tarla"
   yuzolcumuM2?: number; // Örn: 2746.15 (ondalıklı m² destekli - çoklu parselde toplam alan)
   paftaNo?: string; // Örn: "G38-B-04-B-2-B"

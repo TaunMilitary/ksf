@@ -365,9 +365,10 @@ export default function App() {
   const [selectedLng, setSelectedLng] = useState<number>(37.54728);
   const [selectedCorridor, setSelectedCorridor] = useState<string>("Ilıca - İslamdağ Vadisi");
 
-  // Ada / Parsel & TKGM Kadastro Taşınmaz Sınır State (Örnek veri olmadan temiz başlar)
+  // Ada / Parsel / Bağımsız Bölüm No & TKGM Kadastro Taşınmaz Sınır State (Örnek veri olmadan temiz başlar)
   const [adaNo, setAdaNo] = useState<string>("");
   const [parselNo, setParselNo] = useState<string>("");
+  const [bagimsizBolumNo, setBagimsizBolumNo] = useState<string>("");
   const [nitelik, setNitelik] = useState<string>("");
   const [yuzolcumuInput, setYuzolcumuInput] = useState<string>("");
   const [paftaNo, setPaftaNo] = useState<string>("");
@@ -730,6 +731,7 @@ export default function App() {
               : neighborhoodInput,
             adaNo: res.adaNo,
             parselNo: res.parselNo,
+            bagimsizBolumNo: bagimsizBolumNo.trim() || undefined,
             nitelik: res.nitelik || nitelik,
             yuzolcumuM2: res.areaM2,
             paftaNo: res.paftaNo || paftaNo,
@@ -755,7 +757,11 @@ export default function App() {
               (p.mahalleId || resolvedMahId) === resolvedMahId &&
               p.adaNo === primaryItem.adaNo &&
               p.parselNo === primaryItem.parselNo
-                ? primaryItem
+                ? {
+                    ...primaryItem,
+                    bagimsizBolumNo:
+                      primaryItem.bagimsizBolumNo || p.bagimsizBolumNo,
+                  }
                 : p
             );
           });
@@ -821,13 +827,15 @@ export default function App() {
     if (!cleanParsel) return null;
     const finalAda = cleanAda || "0";
     const finalParsel = cleanParsel;
+    const cleanBb = bagimsizBolumNo.trim() || undefined;
     const areaVal = Number(String(yuzolcumuInput).replace(",", ".")) || 0;
     return {
-      id: `${selectedTkgmMahalleId || formDistrict}-${finalAda}-${finalParsel}`,
+      id: `${selectedTkgmMahalleId || formDistrict}-${finalAda}-${finalParsel}${cleanBb ? `-bb${cleanBb}` : ""}`,
       mahalleId: selectedTkgmMahalleId,
       neighborhood: neighborhoodInput,
       adaNo: finalAda,
       parselNo: finalParsel,
+      bagimsizBolumNo: cleanBb,
       nitelik: nitelik.trim() || undefined,
       yuzolcumuM2: areaVal > 0 ? areaVal : undefined,
       paftaNo: paftaNo.trim() || undefined,
@@ -841,6 +849,7 @@ export default function App() {
   }, [
     adaNo,
     parselNo,
+    bagimsizBolumNo,
     yuzolcumuInput,
     selectedTkgmMahalleId,
     formDistrict,
@@ -940,13 +949,16 @@ export default function App() {
 
     // 1. parsel eklendikten sonra 2. parseli yazarken üzerine yazmaması için parselNo ve detay kutularını temizle (Ada No aynı kalır, kullanıcı hemen 2. parsel numarasını yazabilir)
     setParselNo("");
+    setBagimsizBolumNo("");
     setYuzolcumuInput("");
     setPaftaNo("");
     setParcelPolygon([]);
     setTkgmStatusMessage(null);
     setFocusParcelZoomTrigger((c) => c + 1);
     setFormBannerMessage(
-      `✓ ${item.adaNo} Ada / ${item.parselNo} Parsel dosyaya eklendi. Şimdi 2. (veya sonraki) parsel numarasını yazıp tekrar 'Parseli Dosyaya Ekle' butonuna basabilirsiniz.`
+      `✓ ${item.adaNo} Ada / ${item.parselNo} Parsel${
+        item.bagimsizBolumNo ? ` (Bağımsız Bölüm No: ${item.bagimsizBolumNo})` : ""
+      } dosyaya eklendi. Şimdi 2. (veya sonraki) parsel numarasını yazıp tekrar 'Parseli Dosyaya Ekle' butonuna basabilirsiniz.`
     );
     setTimeout(() => setFormBannerMessage(null), 4000);
   };
@@ -966,6 +978,7 @@ export default function App() {
       if (!options?.keepParcel) {
         setAdaNo("");
         setParselNo("");
+        setBagimsizBolumNo("");
         setYuzolcumuInput("");
         setPaftaNo("");
         setNitelik("");
@@ -1523,6 +1536,7 @@ export default function App() {
     } else {
       const cleanAda = adaNo.trim() || undefined;
       const cleanParsel = parselNo.trim() || undefined;
+      const cleanBb = bagimsizBolumNo.trim() || undefined;
       const parsedAreaNum = Number(String(yuzolcumuInput).replace(",", "."));
       const cleanArea =
         !isNaN(parsedAreaNum) && parsedAreaNum > 0
@@ -1542,15 +1556,17 @@ export default function App() {
           (p) =>
             (p.neighborhood || "") === neighborhoodInput.trim() &&
             p.adaNo === currentKeyAda &&
-            p.parselNo === currentKeyParsel
+            p.parselNo === currentKeyParsel &&
+            (p.bagimsizBolumNo || "") === (cleanBb || "")
         );
         if (!hasCurrent) {
           finalParcelsList.push({
-            id: `${selectedTkgmMahalleId || formDistrict}-${currentKeyAda}-${currentKeyParsel}`,
+            id: `${selectedTkgmMahalleId || formDistrict}-${currentKeyAda}-${currentKeyParsel}${cleanBb ? `-bb${cleanBb}` : ""}`,
             mahalleId: selectedTkgmMahalleId,
             neighborhood: neighborhoodInput.trim(),
             adaNo: currentKeyAda,
             parselNo: currentKeyParsel,
+            bagimsizBolumNo: cleanBb,
             nitelik: nitelik.trim() || undefined,
             yuzolcumuM2: cleanArea,
             paftaNo: paftaNo.trim() || undefined,
@@ -1588,6 +1604,7 @@ export default function App() {
         tkgmMahalleId: primaryParcel?.mahalleId || selectedTkgmMahalleId,
         adaNo: primaryParcel?.adaNo || cleanAda,
         parselNo: primaryParcel?.parselNo || cleanParsel,
+        bagimsizBolumNo: primaryParcel?.bagimsizBolumNo || cleanBb,
         nitelik: primaryParcel?.nitelik || nitelik.trim() || undefined,
         yuzolcumuM2:
           totalMultiArea > 0 ? Number(totalMultiArea.toFixed(2)) : cleanArea,
@@ -1627,6 +1644,7 @@ export default function App() {
     }
     setAdaNo("");
     setParselNo("");
+    setBagimsizBolumNo("");
     setYuzolcumuInput("");
     setPaftaNo("");
     setNitelik("");
@@ -1977,13 +1995,24 @@ export default function App() {
       if (rec.parcels && rec.parcels.length > 1) {
         lines.push(
           `   • *Dosyadaki Parseller (${rec.parcels.length} Adet):* ${rec.parcels
-            .map((p) =>
-              p.neighborhood
-                ? `${p.neighborhood} ${p.adaNo}/${p.parselNo}`
-                : `${p.adaNo}/${p.parselNo}`
-            )
+            .map((p) => {
+              const neighPart = p.neighborhood ? `${p.neighborhood} ` : "";
+              const bbPart = p.bagimsizBolumNo?.trim()
+                ? ` [Bağımsız Bölüm No: ${p.bagimsizBolumNo.trim()}]`
+                : "";
+              return `${neighPart}${p.adaNo}/${p.parselNo}${bbPart}`;
+            })
             .join(", ")}`
         );
+      } else {
+        const singleBb = (
+          rec.bagimsizBolumNo ||
+          rec.parcels?.[0]?.bagimsizBolumNo ||
+          ""
+        ).trim();
+        if (singleBb) {
+          lines.push(`   • *Bağımsız Bölüm No:* ${singleBb}`);
+        }
       }
       if (rec.addressDetail) {
         lines.push(`   • *Mevkii / İnceleme Yeri:* ${rec.addressDetail}`);
@@ -3477,8 +3506,8 @@ export default function App() {
                       </div>
                     )}
 
-                    {/* Ada, Parsel, Yüzölçümü (m²), Pafta */}
-                    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+                    {/* Ada, Parsel, Bağımsız Bölüm No, Yüzölçümü (m²), Pafta */}
+                    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5">
                       <div>
                         <label className="block text-[11px] font-semibold text-slate-700 mb-1">
                           Ada No (Yoksa 0)
@@ -3519,6 +3548,21 @@ export default function App() {
                           }}
                           placeholder="Boş (Kendiniz girin)"
                           className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:border-amber-600 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label
+                          className="block text-[11px] font-semibold text-slate-700 mb-1"
+                          title="Harita veya güzergahı etkilemez; Keşif Ajandasında ve bilirkişilerle yapılan güzergah paylaşımlarında görünür"
+                        >
+                          Bağımsız Bölüm No
+                        </label>
+                        <input
+                          type="text"
+                          value={bagimsizBolumNo}
+                          onChange={(e) => setBagimsizBolumNo(e.target.value)}
+                          placeholder="Örn: 4, Kat 1 No:3"
+                          className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-mono font-bold text-indigo-900 focus:border-amber-600 focus:outline-none"
                         />
                       </div>
                       <div>
@@ -3794,6 +3838,11 @@ export default function App() {
                               >
                                 {p.adaNo} Ada / {p.parselNo} Parsel
                               </button>
+                              {p.bagimsizBolumNo && (
+                                <span className="rounded bg-indigo-50 border border-indigo-200 px-1.5 py-0.2 font-mono text-[10px] font-bold text-indigo-800">
+                                  B.Bölüm: {p.bagimsizBolumNo}
+                                </span>
+                              )}
                               {p.yuzolcumuM2 && (
                                 <span className="font-mono text-[11px] text-emerald-800">
                                   ({formatAreaM2(p.yuzolcumuM2)} m²)
@@ -4575,6 +4624,9 @@ export default function App() {
                                                 ? `${p.neighborhood.replace(/\s+Mahallesi$/i, "")} `
                                                 : ""}
                                               {p.adaNo}/{p.parselNo}
+                                              {p.bagimsizBolumNo
+                                                ? ` [B.Bölüm No: ${p.bagimsizBolumNo}]`
+                                                : ""}
                                               {p.yuzolcumuM2
                                                 ? ` (${formatAreaM2(p.yuzolcumuM2)} m²)`
                                                 : ""}
@@ -5471,6 +5523,26 @@ export default function App() {
                             </span>
                           )}
                         </div>
+
+                        {rec.parcels && rec.parcels.length > 1 && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {rec.parcels.map((p, pIdx) => (
+                              <span
+                                key={p.id || pIdx}
+                                className="rounded bg-amber-50 border border-amber-200 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-amber-950"
+                              >
+                                {pIdx + 1}){" "}
+                                {p.neighborhood
+                                  ? `${p.neighborhood.replace(/\s+Mahallesi$/i, "")} `
+                                  : ""}
+                                {p.adaNo}/{p.parselNo}
+                                {p.bagimsizBolumNo
+                                  ? ` · B.Bölüm No: ${p.bagimsizBolumNo}`
+                                  : ""}
+                              </span>
+                            ))}
+                          </div>
+                        )}
 
                         {rec.experts && (
                           <div className="mt-0.5 text-[11px] text-slate-600">

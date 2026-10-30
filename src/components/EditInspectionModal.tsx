@@ -74,6 +74,7 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
   const [parcels, setParcels] = useState<ParcelItem[]>([]);
   const [newAdaNo, setNewAdaNo] = useState("");
   const [newParselNo, setNewParselNo] = useState("");
+  const [newBagimsizBolumNo, setNewBagimsizBolumNo] = useState("");
   const [newNitelik, setNewNitelik] = useState("");
   const [newYuzolcumu, setNewYuzolcumu] = useState("");
   const [newPaftaNo, setNewPaftaNo] = useState("");
@@ -129,7 +130,14 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
 
     // Mevcut parselleri yükle (Eğer parcels dizisi varsa onu, yoksa tekil adaNo/parselNo'yu listeye al)
     if (record.parcels && record.parcels.length > 0) {
-      setParcels(record.parcels.map((p) => ({ ...p })));
+      setParcels(
+        record.parcels.map((p, idx) => ({
+          ...p,
+          bagimsizBolumNo:
+            p.bagimsizBolumNo ||
+            (idx === 0 ? record.bagimsizBolumNo : undefined),
+        }))
+      );
     } else if (record.adaNo || record.parselNo) {
       setParcels([
         {
@@ -140,6 +148,7 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
           neighborhood: record.neighborhood,
           adaNo: record.adaNo || "0",
           parselNo: record.parselNo || "",
+          bagimsizBolumNo: record.bagimsizBolumNo,
           nitelik: record.nitelik,
           yuzolcumuM2: record.yuzolcumuM2,
           paftaNo: record.paftaNo,
@@ -156,6 +165,7 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
 
     setNewAdaNo("");
     setNewParselNo("");
+    setNewBagimsizBolumNo("");
     setNewNitelik("");
     setNewYuzolcumu("");
     setNewPaftaNo("");
@@ -350,12 +360,14 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
       });
 
       const resolvedMah = res.mahalleId || tkgmMahalleId;
+      const cleanNewBb = newBagimsizBolumNo.trim() || undefined;
       const newItem: ParcelItem = {
-        id: `${resolvedMah || district}-${res.adaNo}-${res.parselNo}`,
+        id: `${resolvedMah || district}-${res.adaNo}-${res.parselNo}${cleanNewBb ? `-bb${cleanNewBb}` : ""}`,
         mahalleId: resolvedMah,
         neighborhood,
         adaNo: res.adaNo,
         parselNo: res.parselNo,
+        bagimsizBolumNo: cleanNewBb,
         nitelik: newNitelik.trim() || res.nitelik || undefined,
         yuzolcumuM2: manualArea || res.areaM2,
         paftaNo: newPaftaNo.trim() || res.paftaNo || undefined,
@@ -372,7 +384,8 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
           (p) =>
             (p.neighborhood || "") === (newItem.neighborhood || "") &&
             p.adaNo === newItem.adaNo &&
-            p.parselNo === newItem.parselNo
+            p.parselNo === newItem.parselNo &&
+            (p.bagimsizBolumNo || "") === (newItem.bagimsizBolumNo || "")
         );
         if (existsIdx >= 0) {
           const copy = [...prev];
@@ -418,12 +431,15 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
       }
 
       setNewParselNo("");
+      setNewBagimsizBolumNo("");
       setNewYuzolcumu("");
       setNewPaftaNo("");
       setTkgmMessage(
-        `✓ ${newItem.adaNo} Ada / ${newItem.parselNo} Parsel (${formatAreaM2(
-          newItem.yuzolcumuM2 || 0
-        )} m²) dosyaya eklendi.`
+        `✓ ${newItem.adaNo} Ada / ${newItem.parselNo} Parsel${
+          newItem.bagimsizBolumNo
+            ? ` (Bağımsız Bölüm No: ${newItem.bagimsizBolumNo})`
+            : ""
+        } (${formatAreaM2(newItem.yuzolcumuM2 || 0)} m²) dosyaya eklendi.`
       );
     } finally {
       setIsQueryingTkgm(false);
@@ -466,17 +482,22 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
     if (subjectType === "tasinmaz" && newParselNo.trim()) {
       const cleanAda = newAdaNo.trim() || "0";
       const cleanParsel = newParselNo.trim();
+      const cleanBb = newBagimsizBolumNo.trim() || undefined;
       const alreadyExists = finalParcels.some(
-        (p) => p.adaNo === cleanAda && p.parselNo === cleanParsel
+        (p) =>
+          p.adaNo === cleanAda &&
+          p.parselNo === cleanParsel &&
+          (p.bagimsizBolumNo || "") === (cleanBb || "")
       );
       if (!alreadyExists) {
         const parsedArea = Number(String(newYuzolcumu).replace(",", "."));
         finalParcels.push({
-          id: `${tkgmMahalleId || district}-${cleanAda}-${cleanParsel}`,
+          id: `${tkgmMahalleId || district}-${cleanAda}-${cleanParsel}${cleanBb ? `-bb${cleanBb}` : ""}`,
           mahalleId: tkgmMahalleId,
           neighborhood: neighborhood.trim(),
           adaNo: cleanAda,
           parselNo: cleanParsel,
+          bagimsizBolumNo: cleanBb,
           nitelik: newNitelik.trim() || undefined,
           yuzolcumuM2:
             !isNaN(parsedArea) && parsedArea > 0 ? parsedArea : undefined,
@@ -550,6 +571,7 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
       };
       updatedRecord.adaNo = undefined;
       updatedRecord.parselNo = undefined;
+      updatedRecord.bagimsizBolumNo = undefined;
       updatedRecord.nitelik = undefined;
       updatedRecord.yuzolcumuM2 = undefined;
       updatedRecord.paftaNo = undefined;
@@ -559,6 +581,8 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
       updatedRecord.vehicleInfo = undefined;
       updatedRecord.adaNo = primaryParcel?.adaNo || undefined;
       updatedRecord.parselNo = primaryParcel?.parselNo || undefined;
+      updatedRecord.bagimsizBolumNo =
+        primaryParcel?.bagimsizBolumNo || undefined;
       updatedRecord.nitelik = primaryParcel?.nitelik || undefined;
       updatedRecord.yuzolcumuM2 =
         totalArea > 0 ? Number(totalArea.toFixed(2)) : undefined;
@@ -867,7 +891,7 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
                         key={p.id || idx}
                         className="rounded-lg border border-amber-300 bg-white p-2.5 shadow-2xs space-y-2"
                       >
-                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-7 items-end">
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-8 items-end">
                           <div>
                             <label className="block text-[10px] font-bold text-slate-600 mb-0.5">
                               {idx + 1}. Parsel — Mahalle
@@ -920,6 +944,24 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
                               }
                               placeholder="Parsel"
                               className="w-full rounded border border-slate-300 px-2 py-1 text-xs font-mono font-bold text-slate-900 focus:border-amber-600 focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-600 mb-0.5">
+                              Bağımsız Bölüm No
+                            </label>
+                            <input
+                              type="text"
+                              value={p.bagimsizBolumNo || ""}
+                              onChange={(e) =>
+                                handleUpdateParcelField(
+                                  idx,
+                                  "bagimsizBolumNo",
+                                  e.target.value || undefined
+                                )
+                              }
+                              placeholder="Örn: 4"
+                              className="w-full rounded border border-slate-300 px-2 py-1 text-xs font-mono font-bold text-indigo-900 focus:border-amber-600 focus:outline-none"
                             />
                           </div>
                           <div>
@@ -1001,7 +1043,7 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
                     + Dosyaya Yeni Parsel Ekle (TKGM Sınır & Yüzölçümü Otomatik
                     Çekilir)
                   </div>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 items-end">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-6 items-end">
                     <div>
                       <label className="block text-[10px] font-semibold text-slate-700 mb-0.5">
                         Ada No (Yoksa 0)
@@ -1030,6 +1072,18 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
                         }}
                         placeholder="Örn: 13"
                         className="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:border-emerald-600 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-700 mb-0.5">
+                        Bağımsız Bölüm No
+                      </label>
+                      <input
+                        type="text"
+                        value={newBagimsizBolumNo}
+                        onChange={(e) => setNewBagimsizBolumNo(e.target.value)}
+                        placeholder="Örn: 4"
+                        className="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs font-mono font-bold text-indigo-900 focus:border-emerald-600 focus:outline-none"
                       />
                     </div>
                     <div>

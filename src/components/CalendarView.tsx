@@ -487,6 +487,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                                     ? `${p.neighborhood.replace(/\s+Mahallesi$/i, "")} `
                                     : ""}
                                   {p.adaNo}/{p.parselNo}
+                                  {p.bagimsizBolumNo
+                                    ? ` [B.Bölüm: ${p.bagimsizBolumNo}]`
+                                    : ""}
                                   {p.yuzolcumuM2
                                     ? ` (${formatAreaM2(p.yuzolcumuM2)} m²)`
                                     : ""}
