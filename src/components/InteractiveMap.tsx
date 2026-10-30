@@ -7,11 +7,16 @@ import {
 } from "../data/fatsaData";
 import { InspectionRecord, ParcelItem } from "../types";
 import {
+  buildDailyRoutePoints,
+  calculateHaversineKm,
   calculatePolygonAreaM2,
+  extractRecordLocationStops,
   formatAdaParselLabel,
   formatAreaM2,
   formatDateTR,
   formatVehicleLabel,
+  getRecordUniqueNeighborhoods,
+  resolveNeighborhoodCoordinates,
 } from "../services/geoService";
 
 interface InteractiveMapProps {
@@ -187,11 +192,21 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     let parcelBounds: L.LatLngBounds | null = null;
     let targetMarker: L.Marker | null = null;
 
-    // Render all parcels in selectedParcels (1st, 2nd, 3rd... parcel)
+    // Render all parcels in selectedParcels (1st, 2nd, 3rd... parcel across one or multiple neighborhoods)
     if (selectedParcels && selectedParcels.length > 0) {
       selectedParcels.forEach((p, idx) => {
         const strokeColor = idx === 0 ? "#ea580c" : "#0284c7";
         const fillColor = idx === 0 ? "#f59e0b" : "#38bdf8";
+
+        let pLat = p.centerLat;
+        let pLng = p.centerLng;
+        if ((!pLat || !pLng) && p.neighborhood) {
+          const resolved = resolveNeighborhoodCoordinates(p.neighborhood);
+          if (resolved) {
+            pLat = resolved.lat;
+            pLng = resolved.lng;
+          }
+        }
 
         if (p.polygon && p.polygon.length >= 3) {
           const pPoly = L.polygon(p.polygon, {
@@ -212,26 +227,38 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             <div style="min-width:205px;">
               <div style="font-size:10px;font-weight:700;color:${strokeColor};">DOSYADAKİ ${idx + 1}. PARSEL</div>
               <div style="font-size:14px;font-weight:800;color:#0f172a;margin-top:2px;">📐 ${p.adaNo} Ada / ${p.parselNo} Parsel</div>
-              ${p.neighborhood ? `<div style="font-size:12px;color:#334155;">${p.neighborhood}</div>` : ""}
+              ${p.neighborhood ? `<div style="font-size:12px;font-weight:600;color:#1e293b;">📍 ${p.neighborhood}</div>` : ""}
               ${p.nitelik ? `<div style="font-size:11px;color:#475569;margin-top:2px;">Nitelik: <strong>${p.nitelik}</strong></div>` : ""}
               ${p.yuzolcumuM2 ? `<div style="font-size:12px;color:#059669;font-family:monospace;font-weight:700;margin-top:2px;">Yüzölçümü: ${formatAreaM2(p.yuzolcumuM2)} m²</div>` : ""}
             </div>
           `);
+        } else if (pLat && pLng) {
+          if (!parcelBounds) {
+            parcelBounds = L.latLngBounds([
+              [pLat, pLng],
+              [pLat, pLng],
+            ]);
+          } else {
+            parcelBounds.extend([pLat, pLng]);
+          }
         }
 
-        // Birden fazla parsel varsa her parselin merkezine numaralı parsel etiketi koy
-        if (selectedParcels.length > 1 && p.centerLat && p.centerLng) {
+        // Her parselin/mahallenin merkezine mahalle adı + numaralı parsel etiketi koy
+        if (selectedParcels.length > 1 && pLat && pLng) {
+          const shortNeigh = p.neighborhood
+            ? p.neighborhood.replace(" Mahallesi", "")
+            : "";
           const badgeIcon = L.divIcon({
             className: "custom-div-icon",
             html: `
               <div style="background:${strokeColor};color:#ffffff;font-size:10px;font-weight:800;font-family:monospace;padding:2px 6px;border-radius:5px;border:1.5px solid #ffffff;box-shadow:0 2px 6px rgba(0,0,0,0.3);white-space:nowrap;">
-                #${idx + 1}: ${p.adaNo}/${p.parselNo}
+                #${idx + 1}: ${shortNeigh ? `${shortNeigh} ` : ""}${p.adaNo}/${p.parselNo}
               </div>
             `,
-            iconSize: [90, 22],
-            iconAnchor: [45, 11],
+            iconSize: [120, 22],
+            iconAnchor: [60, 11],
           });
-          L.marker([p.centerLat, p.centerLng], {
+          L.marker([pLat, pLng], {
             icon: badgeIcon,
             zIndexOffset: 910 + idx,
           }).addTo(layerGroup);
@@ -525,16 +552,32 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       let focusedMarker: L.Marker | null = null;
 
       sorted.forEach((rec, index) => {
-        boundsPoints.push([rec.lat, rec.lng]);
         const isFilteredDay = Boolean(filterDate);
         const isFocused = focusedInspectionId === rec.id;
         const cMeta = getCaseTypeVisualMeta(rec.caseType);
         const adaParselText = formatAdaParselLabel(rec);
         const vehicleText = formatVehicleLabel(rec);
+        const recordStops = extractRecordLocationStops(rec);
+        const uniqueNeighs = getRecordUniqueNeighborhoods(rec);
+
+        // Dosyadaki tüm mahalle ve parsel duraklarını harita sınırlarına (bounds) dahil et
+        recordStops.forEach((st) => {
+          boundsPoints.push([st.lat, st.lng]);
+          if (isFocused) {
+            if (!focusedParcelBounds) {
+              focusedParcelBounds = L.latLngBounds([
+                [st.lat, st.lng],
+                [st.lat, st.lng],
+              ]);
+            } else {
+              focusedParcelBounds.extend([st.lat, st.lng]);
+            }
+          }
+        });
 
         // Render multi-parcel boundary polygons if available
         if (rec.parcels && rec.parcels.length > 0) {
-          rec.parcels.forEach((p) => {
+          rec.parcels.forEach((p, pIdx) => {
             if (p.polygon && p.polygon.length >= 3) {
               const polyLayer = L.polygon(p.polygon, {
                 color: isFocused ? "#ea580c" : cMeta.bgColor,
@@ -543,6 +586,15 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                 fillColor: isFocused ? "#f59e0b" : cMeta.bgColor,
                 fillOpacity: isFocused ? 0.42 : 0.25,
               }).addTo(layerGroup);
+
+              polyLayer.bindPopup(`
+                <div style="min-width:210px;">
+                  <div style="font-size:10px;font-weight:700;color:${cMeta.bgColor};">${rec.esasNo} · ${pIdx + 1}. PARSEL</div>
+                  <div style="font-size:13px;font-weight:800;color:#0f172a;margin-top:2px;">📍 ${p.neighborhood || rec.neighborhood}</div>
+                  <div style="font-size:13px;font-weight:700;color:#b45309;margin-top:2px;">📐 ${p.adaNo} Ada / ${p.parselNo} Parsel</div>
+                  ${p.yuzolcumuM2 ? `<div style="font-size:11px;font-family:monospace;color:#059669;font-weight:700;margin-top:2px;">Yüzölçümü: ${formatAreaM2(p.yuzolcumuM2)} m²</div>` : ""}
+                </div>
+              `);
 
               if (isFocused) {
                 if (!focusedParcelBounds) {
@@ -563,131 +615,190 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           }).addTo(layerGroup);
 
           if (isFocused) {
-            focusedParcelBounds = polyLayer.getBounds();
+            if (!focusedParcelBounds) {
+              focusedParcelBounds = polyLayer.getBounds();
+            } else {
+              focusedParcelBounds.extend(polyLayer.getBounds());
+            }
           }
         }
 
-        const topBadgeText =
-          rec.subjectType === "arac" && rec.vehicleInfo?.plateNo
-            ? `🚗 ${rec.vehicleInfo.plateNo}`
-            : rec.parcels && rec.parcels.length > 1
-            ? `${rec.parcels.length} Parsel (${rec.parcels[0].adaNo}/${rec.parcels[0].parselNo}+)`
-            : adaParselText
-            ? `${rec.adaNo || "0"}/${rec.parselNo || "1"}`
-            : null;
+        // Eğer tek bir dosyada birden fazla mahalle/durak varsa ve gün filtresi kapalıysa (veya bu dosya seçiliyse),
+        // aynı dosyanın mahallelerini birbirine bağlayan yardımcı kesikli rota çizgisi çiz
+        if (recordStops.length > 1 && (!filterDate || isFocused)) {
+          const multiStopCoords: [number, number][] =
+            isFocused && rec.routeGeometry && rec.routeGeometry.length > 1
+              ? rec.routeGeometry
+              : [
+                  [FATSA_COURTHOUSE.lat, FATSA_COURTHOUSE.lng],
+                  ...recordStops.map((s) => [s.lat, s.lng] as [number, number]),
+                ];
+          L.polyline(multiStopCoords, {
+            color: isFocused ? "#ea580c" : cMeta.bgColor,
+            weight: isFocused ? 3.5 : 2.5,
+            opacity: 0.85,
+            dashArray: isFocused ? undefined : "5, 6",
+          }).addTo(layerGroup);
+        }
 
-        // Dynamic Pin Icon by Case Type (Keşif Türü) + Stop Number if day filter is active
-        const pinIcon = L.divIcon({
-          className: "custom-div-icon",
-          html: `
-            <div style="display:flex;flex-direction:column;align-items:center;position:relative;">
+        // Dosyadaki her farklı mahalle / parsel durağı için haritada ayrı pin (işaretçi) oluştur!
+        const distinctVisualStops = recordStops.filter((st, stIdx) => {
+          if (stIdx === 0) return true;
+          const prev = recordStops[stIdx - 1];
+          const distKm = calculateHaversineKm(prev.lat, prev.lng, st.lat, st.lng);
+          const diffNeigh =
+            prev.neighborhood.toLocaleLowerCase("tr-TR") !==
+            st.neighborhood.toLocaleLowerCase("tr-TR");
+          return diffNeigh || distKm >= 0.05;
+        });
+
+        distinctVisualStops.forEach((stop, stopIdx) => {
+          const isMultiStopFile = distinctVisualStops.length > 1;
+          const shortNeigh = stop.neighborhood.replace(" Mahallesi", "");
+          const topBadgeText =
+            rec.subjectType === "arac" && rec.vehicleInfo?.plateNo
+              ? `🚗 ${rec.vehicleInfo.plateNo}`
+              : isMultiStopFile
+              ? `${shortNeigh}${stop.adaNo || stop.parselNo ? ` (${stop.adaNo || "0"}/${stop.parselNo || "1"})` : ""}`
+              : rec.parcels && rec.parcels.length > 1
+              ? `${rec.parcels.length} Parsel (${rec.parcels[0].adaNo}/${rec.parcels[0].parselNo}+)`
+              : adaParselText
+              ? `${rec.adaNo || "0"}/${rec.parselNo || "1"}`
+              : shortNeigh;
+
+          const stopNumberBadge = isFilteredDay
+            ? isMultiStopFile
+              ? `${index + 1}.${stopIdx + 1}`
+              : `${index + 1}`
+            : isMultiStopFile
+            ? `${stopIdx + 1}/${distinctVisualStops.length}`
+            : "";
+
+          const pinIcon = L.divIcon({
+            className: "custom-div-icon",
+            html: `
+              <div style="display:flex;flex-direction:column;align-items:center;position:relative;">
+                ${
+                  topBadgeText
+                    ? `<div style="background:${
+                        isFocused ? "#0f172a" : cMeta.bgColor
+                      };color:#ffffff;font-size:9px;font-weight:700;font-family:monospace;padding:1px 5px;border-radius:4px;border:1px solid #ffffff;white-space:nowrap;margin-bottom:2px;box-shadow:0 2px 4px rgba(0,0,0,0.25);">
+                        ${topBadgeText}
+                      </div>`
+                    : ""
+                }
+                <div style="position:relative;display:flex;align-items:center;justify-content:center;width:${
+                  isFocused ? "38px" : "34px"
+                };height:${
+              isFocused ? "38px" : "34px"
+            };border-radius:50%;background:${cMeta.bgColor};color:#ffffff;border:${
+              isFocused ? "3px solid #fde047" : "2.5px solid #ffffff"
+            };box-shadow:0 4px 12px rgba(15,23,42,0.35);font-size:15px;">
+                  <span>${rec.subjectType === "arac" ? "🚗" : cMeta.icon}</span>
+                  ${
+                    stopNumberBadge
+                      ? `<span style="position:absolute;top:-5px;right:-6px;display:flex;align-items:center;justify-content:center;min-width:17px;height:17px;padding:0 3px;border-radius:999px;background:#0f172a;color:#ffffff;border:1.5px solid #ffffff;font-size:9px;font-weight:800;font-family:monospace;">
+                          ${stopNumberBadge}
+                        </span>`
+                      : ""
+                  }
+                </div>
+              </div>
+            `,
+            iconSize: topBadgeText ? [120, 54] : [38, 38],
+            iconAnchor: topBadgeText ? [60, 37] : [19, 19],
+            popupAnchor: [0, -22],
+          });
+
+          const marker = L.marker([stop.lat, stop.lng], {
+            icon: pinIcon,
+            zIndexOffset: isFocused ? 980 - stopIdx : 500 - stopIdx,
+          });
+
+          const allNeighsText =
+            uniqueNeighs.length > 1
+              ? uniqueNeighs.join(" · ")
+              : rec.neighborhood;
+
+          marker.bindPopup(`
+            <div style="min-width:240px;">
+              <div style="display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:5px;background:${cMeta.badgeBg};color:${cMeta.badgeText};font-size:10px;font-weight:800;margin-bottom:4px;">
+                <span>${cMeta.icon}</span>
+                <span>${rec.caseType}</span>
+              </div>
+              <div style="font-size:11px;font-weight:600;color:#059669;">
+                ${isFilteredDay ? `${index + 1}. DOSYA${isMultiStopFile ? ` (${stopIdx + 1}. Mahalle Durağı)` : ""} · ` : ""}${formatDateTR(rec.date)} · Saat ${rec.time}
+              </div>
+              <div style="font-size:14px;font-weight:700;color:#0f172a;margin-top:2px;">
+                📍 [${rec.district || "Fatsa"}] ${stop.neighborhood}
+              </div>
               ${
-                topBadgeText
-                  ? `<div style="background:${
-                      isFocused ? "#0f172a" : cMeta.bgColor
-                    };color:#ffffff;font-size:9px;font-weight:700;font-family:monospace;padding:1px 5px;border-radius:4px;border:1px solid #ffffff;white-space:nowrap;margin-bottom:2px;box-shadow:0 2px 4px rgba(0,0,0,0.25);">
-                      ${topBadgeText}
+                uniqueNeighs.length > 1
+                  ? `<div style="font-size:11px;font-weight:700;color:#0284c7;margin-top:2px;">🗺️ Dosyadaki Tüm Mahalleler (${uniqueNeighs.length}): ${allNeighsText}</div>`
+                  : ""
+              }
+              <div style="font-size:12px;color:#334155;margin-top:2px;">
+                Dosya No: <strong>${rec.esasNo}</strong>
+              </div>
+              ${
+                rec.experts
+                  ? `<div style="font-size:11px;color:#475569;margin-top:2px;">Bilirkişi: <strong>${rec.experts}</strong></div>`
+                  : ""
+              }
+              ${
+                rec.createdBy
+                  ? `<div style="font-size:11px;color:#334155;margin-top:2px;">Ekleyen: <strong>${rec.createdBy}</strong></div>`
+                  : ""
+              }
+              ${
+                vehicleText
+                  ? `<div style="margin-top:5px;padding:5px 7px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:6px;font-size:11px;color:#312e81;">
+                      <div style="font-weight:800;">🚗 Araç Plaka: ${vehicleText}</div>
+                      ${rec.vehicleInfo?.damageSummary ? `<div style="margin-top:1px;">Hasar/Tespit: <strong>${rec.vehicleInfo.damageSummary}</strong></div>` : ""}
+                      ${rec.vehicleInfo?.inspectionPlace ? `<div style="margin-top:1px;">İnceleme Yeri: ${rec.vehicleInfo.inspectionPlace}</div>` : ""}
                     </div>`
                   : ""
               }
-              <div style="position:relative;display:flex;align-items:center;justify-content:center;width:${
-                isFocused ? "38px" : "34px"
-              };height:${
-            isFocused ? "38px" : "34px"
-          };border-radius:50%;background:${cMeta.bgColor};color:#ffffff;border:${
-            isFocused ? "3px solid #fde047" : "2.5px solid #ffffff"
-          };box-shadow:0 4px 12px rgba(15,23,42,0.35);font-size:15px;">
-                <span>${rec.subjectType === "arac" ? "🚗" : cMeta.icon}</span>
-                ${
-                  isFilteredDay
-                    ? `<span style="position:absolute;top:-5px;right:-6px;display:flex;align-items:center;justify-content:center;min-width:17px;height:17px;padding:0 3px;border-radius:999px;background:#0f172a;color:#ffffff;border:1.5px solid #ffffff;font-size:9px;font-weight:800;font-family:monospace;">
-                        ${index + 1}
-                      </span>`
-                    : ""
-                }
+              ${
+                adaParselText
+                  ? `<div style="margin-top:5px;padding:5px 7px;background:#fffbeb;border:1px solid #fcd34d;border-radius:6px;font-size:11px;color:#92400e;">
+                      <div style="font-weight:800;">📐 ${adaParselText}</div>
+                      ${
+                        rec.parcels && rec.parcels.length > 1
+                          ? `<div style="margin-top:2px;font-family:monospace;font-size:10px;">${rec.parcels
+                              .map(
+                                (p, pIdx) =>
+                                  `${pIdx + 1}) ${p.neighborhood ? `[${p.neighborhood.replace(" Mahallesi", "")}] ` : ""}${p.adaNo}/${p.parselNo}`
+                              )
+                              .join(" · ")}</div>`
+                          : ""
+                      }
+                      ${rec.nitelik ? `<div style="margin-top:1px;">Nitelik: <strong>${rec.nitelik}</strong></div>` : ""}
+                      ${rec.yuzolcumuM2 ? `<div style="font-family:monospace;margin-top:1px;">Yüzölçümü: <strong>${formatAreaM2(rec.yuzolcumuM2)} m²</strong>${rec.paftaNo ? ` · Pafta: ${rec.paftaNo}` : ""}</div>` : ""}
+                    </div>`
+                  : ""
+              }
+              ${
+                rec.addressDetail
+                  ? `<div style="font-size:11px;color:#64748b;margin-top:3px;">${rec.addressDetail}</div>`
+                  : ""
+              }
+              <div style="font-size:11px;color:#0f172a;margin-top:6px;padding-top:5px;border-top:1px solid #e2e8f0;font-family:monospace;">
+                Adliye Toplam Güzergah: <strong>${rec.distanceKm} km</strong> (~${rec.durationMin} dk)
               </div>
             </div>
-          `,
-          iconSize: topBadgeText ? [104, 54] : [38, 38],
-          iconAnchor: topBadgeText ? [52, 37] : [19, 19],
-          popupAnchor: [0, -22],
+          `);
+
+          if (onSelectInspection) {
+            marker.on("click", () => onSelectInspection(rec));
+          }
+
+          if (isFocused && stopIdx === 0) {
+            focusedMarker = marker;
+          }
+
+          marker.addTo(layerGroup);
         });
-
-        const marker = L.marker([rec.lat, rec.lng], {
-          icon: pinIcon,
-          zIndexOffset: isFocused ? 980 : 500,
-        });
-
-        marker.bindPopup(`
-          <div style="min-width:235px;">
-            <div style="display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:5px;background:${cMeta.badgeBg};color:${cMeta.badgeText};font-size:10px;font-weight:800;margin-bottom:4px;">
-              <span>${cMeta.icon}</span>
-              <span>${rec.caseType}</span>
-            </div>
-            <div style="font-size:11px;font-weight:600;color:#059669;">
-              ${isFilteredDay ? `${index + 1}. DURAK · ` : ""}${formatDateTR(rec.date)} · Saat ${rec.time}
-            </div>
-            <div style="font-size:14px;font-weight:700;color:#0f172a;margin-top:2px;">
-              [${rec.district || "Fatsa"}] ${rec.neighborhood}
-            </div>
-            <div style="font-size:12px;color:#334155;margin-top:2px;">
-              Dosya No: <strong>${rec.esasNo}</strong>
-            </div>
-            ${
-              rec.experts
-                ? `<div style="font-size:11px;color:#475569;margin-top:2px;">Bilirkişi: <strong>${rec.experts}</strong></div>`
-                : ""
-            }
-            ${
-              rec.createdBy
-                ? `<div style="font-size:11px;color:#334155;margin-top:2px;">Ekleyen: <strong>${rec.createdBy}</strong></div>`
-                : ""
-            }
-            ${
-              vehicleText
-                ? `<div style="margin-top:5px;padding:5px 7px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:6px;font-size:11px;color:#312e81;">
-                    <div style="font-weight:800;">🚗 Araç Plaka: ${vehicleText}</div>
-                    ${rec.vehicleInfo?.damageSummary ? `<div style="margin-top:1px;">Hasar/Tespit: <strong>${rec.vehicleInfo.damageSummary}</strong></div>` : ""}
-                    ${rec.vehicleInfo?.inspectionPlace ? `<div style="margin-top:1px;">İnceleme Yeri: ${rec.vehicleInfo.inspectionPlace}</div>` : ""}
-                  </div>`
-                : ""
-            }
-            ${
-              adaParselText
-                ? `<div style="margin-top:5px;padding:5px 7px;background:#fffbeb;border:1px solid #fcd34d;border-radius:6px;font-size:11px;color:#92400e;">
-                    <div style="font-weight:800;">📐 ${adaParselText}</div>
-                    ${
-                      rec.parcels && rec.parcels.length > 1
-                        ? `<div style="margin-top:2px;font-family:monospace;font-size:10px;">${rec.parcels
-                            .map((p, pIdx) => `${pIdx + 1}) ${p.adaNo}/${p.parselNo}`)
-                            .join(" · ")}</div>`
-                        : ""
-                    }
-                    ${rec.nitelik ? `<div style="margin-top:1px;">Nitelik: <strong>${rec.nitelik}</strong></div>` : ""}
-                    ${rec.yuzolcumuM2 ? `<div style="font-family:monospace;margin-top:1px;">Yüzölçümü: <strong>${formatAreaM2(rec.yuzolcumuM2)} m²</strong>${rec.paftaNo ? ` · Pafta: ${rec.paftaNo}` : ""}</div>` : ""}
-                  </div>`
-                : ""
-            }
-            ${
-              rec.addressDetail
-                ? `<div style="font-size:11px;color:#64748b;margin-top:3px;">${rec.addressDetail}</div>`
-                : ""
-            }
-            <div style="font-size:11px;color:#0f172a;margin-top:6px;padding-top:5px;border-top:1px solid #e2e8f0;font-family:monospace;">
-              Adliye Mesafesi: <strong>${rec.distanceKm} km</strong> (~${rec.durationMin} dk)
-            </div>
-          </div>
-        `);
-
-        if (onSelectInspection) {
-          marker.on("click", () => onSelectInspection(rec));
-        }
-
-        if (isFocused) {
-          focusedMarker = marker;
-        }
-
-        marker.addTo(layerGroup);
       });
 
       // Also render any actively queried Ada/Parsel on Overview map if user searched from the top bar!
@@ -703,15 +814,13 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
         queriedMarker = qRender.marker;
       }
 
-      // If filterDate is active (or dailyRouteGeometry provided), draw polyline connecting Courthouse -> Stop 1 -> Stop 2 ...
+      // If filterDate is active (or dailyRouteGeometry provided), draw polyline connecting Courthouse -> all neighborhoods & stops in order
       if (filterDate && sorted.length > 0) {
+        const fallbackWaypoints = buildDailyRoutePoints(sorted);
         const routeCoords: [number, number][] =
           dailyRouteGeometry && dailyRouteGeometry.length > 1
             ? dailyRouteGeometry
-            : [
-                [FATSA_COURTHOUSE.lat, FATSA_COURTHOUSE.lng],
-                ...sorted.map((s) => [s.lat, s.lng] as [number, number]),
-              ];
+            : fallbackWaypoints.map((w) => [w.lat, w.lng] as [number, number]);
 
         L.polyline(routeCoords, {
           color: "#10b981",

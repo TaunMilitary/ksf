@@ -492,22 +492,291 @@ export function findSmartRouteSuggestions(
   return suggestions.sort((a, b) => a.distanceBetweenKm - b.distanceBetweenKm);
 }
 
+/**
+ * Mahalle adından (veya TKGM mahalle kaydından) en doğru koordinatı bulur
+ */
+export function resolveNeighborhoodCoordinates(
+  neighborhoodName: string,
+  preferredDistrict: CourtDistrict = "Fatsa"
+): { lat: number; lng: number; matchedName: string; district: CourtDistrict } | null {
+  const clean = neighborhoodName.trim();
+  if (!clean) return null;
+  const key = normalizeMahalleKey(clean);
+  if (!key) return null;
+
+  // 1. Önce yerel mahalle koordinat listesinde tam veya kısmi eşleşme ara
+  const exactLocal =
+    FATSA_NEIGHBORHOODS.find(
+      (n) =>
+        n.district === preferredDistrict &&
+        (normalizeMahalleKey(n.name) === key ||
+          normalizeMahalleKey(n.name).startsWith(key) ||
+          key.startsWith(normalizeMahalleKey(n.name)))
+    ) ||
+    FATSA_NEIGHBORHOODS.find(
+      (n) =>
+        normalizeMahalleKey(n.name) === key ||
+        normalizeMahalleKey(n.name).startsWith(key) ||
+        key.startsWith(normalizeMahalleKey(n.name))
+    );
+
+  if (exactLocal) {
+    return {
+      lat: exactLocal.lat,
+      lng: exactLocal.lng,
+      matchedName: exactLocal.name,
+      district: exactLocal.district,
+    };
+  }
+
+  // 2. TKGM Mahalle listesinden eşleştir
+  const tkgmMatch = resolveTkgmMahalle(preferredDistrict, clean);
+  if (tkgmMatch) {
+    const localForTkgm = FATSA_NEIGHBORHOODS.find(
+      (n) =>
+        n.district === tkgmMatch.district &&
+        normalizeMahalleKey(n.name).startsWith(normalizeMahalleKey(tkgmMatch.text))
+    );
+    if (localForTkgm) {
+      return {
+        lat: localForTkgm.lat,
+        lng: localForTkgm.lng,
+        matchedName: `${tkgmMatch.text} Mahallesi`,
+        district: tkgmMatch.district,
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Bir keşif dosyasındaki tüm mahalleleri (hem parcels listesindeki farklı mahalleleri
+ * hem de mahalle alanında virgül / tire / eğik çizgi / '+' ile ayrılmış mahalleleri) tespit eder.
+ */
+export function getRecordUniqueNeighborhoods(rec: {
+  neighborhood?: string;
+  parcels?: ParcelItem[];
+}): string[] {
+  const seenKeys = new Set<string>();
+  const result: string[] = [];
+
+  const addIfUnique = (rawName?: string) => {
+    if (!rawName) return;
+    // Eğer tek bir metin içinde birden fazla mahalle yazılmışsa ("Saraytepe Mah., Ilıca Mah." veya "Evkaf / Dolunay") ayrıştır
+    const parts = rawName
+      .split(/[,;/+&]+|\s+-\s+|\s+ve\s+/i)
+      .map((s) => s.trim())
+      .filter((s) => s.length >= 2);
+
+    for (const part of parts) {
+      const formatted =
+        part.toLocaleLowerCase("tr-TR").includes("mahalle") ||
+        part.toLocaleLowerCase("tr-TR").includes("köy")
+          ? part
+          : `${part} Mahallesi`;
+      const k = normalizeMahalleKey(formatted);
+      if (!k || seenKeys.has(k)) continue;
+      seenKeys.add(k);
+      result.push(formatted);
+    }
+  };
+
+  if (rec.parcels && rec.parcels.length > 0) {
+    for (const p of rec.parcels) {
+      if (p.neighborhood) {
+        addIfUnique(p.neighborhood);
+      }
+    }
+  }
+
+  if (rec.neighborhood) {
+    addIfUnique(rec.neighborhood);
+  }
+
+  return result;
+}
+
+export interface RecordLocationStop {
+  lat: number;
+  lng: number;
+  neighborhood: string;
+  district: CourtDistrict;
+  adaNo?: string;
+  parselNo?: string;
+  yuzolcumuM2?: number;
+  nitelik?: string;
+  polygon?: [number, number][];
+  stopIndexInRecord: number;
+  totalStopsInRecord: number;
+  label: string;
+}
+
+/**
+ * Bir keşif dosyasındaki (InspectionRecord) TÜM mahalleleri ve parsel konumlarını tespit ederek
+ * harita pinleri ve OSRM rota oluşturma için sıralı durak listesi döndürür.
+ */
+export function extractRecordLocationStops(
+  rec: Pick<InspectionRecord, "district" | "neighborhood" | "lat" | "lng"> &
+    Partial<InspectionRecord>
+): RecordLocationStop[] {
+  const rawStops: Omit<
+    RecordLocationStop,
+    "stopIndexInRecord" | "totalStopsInRecord"
+  >[] = [];
+
+  // 1. Önce dosyadaki çoklu parselleri (rec.parcels) incele
+  if (rec.parcels && rec.parcels.length > 0) {
+    for (const p of rec.parcels) {
+      const pNeigh = (p.neighborhood || rec.neighborhood || "").trim();
+      let pLat = p.centerLat;
+      let pLng = p.centerLng;
+
+      if ((!pLat || !pLng) && p.polygon && p.polygon.length >= 3) {
+        const c = getPolygonCentroid(p.polygon);
+        pLat = c.lat;
+        pLng = c.lng;
+      }
+
+      // Eğer parselin koordinatı yoksa veya farklı bir mahalle seçilmiş ama koordinat güncellenmemişse mahalle koordinatını çöz
+      if (pNeigh) {
+        const resolved = resolveNeighborhoodCoordinates(pNeigh, rec.district);
+        if (resolved) {
+          if (!pLat || !pLng) {
+            pLat = resolved.lat;
+            pLng = resolved.lng;
+          } else if (
+            rawStops.length > 0 &&
+            normalizeMahalleKey(pNeigh) !==
+              normalizeMahalleKey(rawStops[0].neighborhood) &&
+            calculateHaversineKm(pLat, pLng, rawStops[0].lat, rawStops[0].lng) <
+              0.05
+          ) {
+            // Farklı mahalle adı verilmiş fakat eski mahallenin merkez koordinatı kalmışsa yeni mahallenin koordinatını kullan
+            pLat = resolved.lat;
+            pLng = resolved.lng;
+          }
+        }
+      }
+
+      const finalLat = pLat || rec.lat;
+      const finalLng = pLng || rec.lng;
+
+      rawStops.push({
+        lat: finalLat,
+        lng: finalLng,
+        neighborhood: pNeigh || rec.neighborhood,
+        district: rec.district,
+        adaNo: p.adaNo,
+        parselNo: p.parselNo,
+        yuzolcumuM2: p.yuzolcumuM2,
+        nitelik: p.nitelik,
+        polygon: p.polygon,
+        label: `${pNeigh || rec.neighborhood} (${p.adaNo || "0"}/${
+          p.parselNo || "1"
+        } - ${rec.esasNo})`,
+      });
+    }
+  }
+
+  // 2. Ayrıca rec.neighborhood içinde birden fazla mahalle adı yazılmışsa (Örn: "Saraytepe Mah. / Ilıca Mah.") ve yukarıdaki parsellerde yoksa onları da ekle
+  const allMentionedNeighborhoods = getRecordUniqueNeighborhoods(rec);
+  for (const neighName of allMentionedNeighborhoods) {
+    const neighKey = normalizeMahalleKey(neighName);
+    const alreadyInStops = rawStops.some(
+      (s) => normalizeMahalleKey(s.neighborhood) === neighKey
+    );
+    if (!alreadyInStops) {
+      const resolved = resolveNeighborhoodCoordinates(neighName, rec.district);
+      const stopLat = resolved ? resolved.lat : rec.lat;
+      const stopLng = resolved ? resolved.lng : rec.lng;
+      rawStops.push({
+        lat: stopLat,
+        lng: stopLng,
+        neighborhood: resolved ? resolved.matchedName : neighName,
+        district: resolved ? resolved.district : rec.district,
+        adaNo: rawStops.length === 0 ? rec.adaNo : undefined,
+        parselNo: rawStops.length === 0 ? rec.parselNo : undefined,
+        yuzolcumuM2: rawStops.length === 0 ? rec.yuzolcumuM2 : undefined,
+        nitelik: rawStops.length === 0 ? rec.nitelik : undefined,
+        polygon: rawStops.length === 0 ? rec.parcelPolygon : undefined,
+        label: `${neighName} (${rec.district} - ${rec.esasNo})`,
+      });
+    }
+  }
+
+  // 3. Hiç durak çıkmadıysa dosyanın ana koordinatını ekle
+  if (rawStops.length === 0) {
+    rawStops.push({
+      lat: rec.lat,
+      lng: rec.lng,
+      neighborhood: rec.neighborhood,
+      district: rec.district,
+      adaNo: rec.adaNo,
+      parselNo: rec.parselNo,
+      yuzolcumuM2: rec.yuzolcumuM2,
+      nitelik: rec.nitelik,
+      polygon: rec.parcelPolygon,
+      label: `${rec.neighborhood} (${rec.district} - ${rec.esasNo})`,
+    });
+  }
+
+  return rawStops.map((s, idx) => ({
+    ...s,
+    stopIndexInRecord: idx + 1,
+    totalStopsInRecord: rawStops.length,
+  }));
+}
+
+/**
+ * Günlük keşif listesindeki tüm dosyaları ve her dosyanın içindeki tüm farklı mahalle/parsel
+ * duraklarını tespit ederek Adliye çıkışlı tam rota noktalarını oluşturur.
+ */
 export function buildDailyRoutePoints(
   dayRecords: InspectionRecord[]
-): { lat: number; lng: number; label: string }[] {
+): { lat: number; lng: number; label: string; esasNo?: string; neighborhood?: string }[] {
   const sorted = [...dayRecords].sort((a, b) => a.time.localeCompare(b.time));
-  return [
+  const points: {
+    lat: number;
+    lng: number;
+    label: string;
+    esasNo?: string;
+    neighborhood?: string;
+  }[] = [
     {
       lat: FATSA_COURTHOUSE.lat,
       lng: FATSA_COURTHOUSE.lng,
       label: FATSA_COURTHOUSE.shortName,
     },
-    ...sorted.map((r) => ({
-      lat: r.lat,
-      lng: r.lng,
-      label: `${r.neighborhood} (${r.district} - ${r.esasNo})`,
-    })),
   ];
+
+  for (const rec of sorted) {
+    const stops = extractRecordLocationStops(rec);
+    for (const st of stops) {
+      const prev = points[points.length - 1];
+      // Aynı mahallede birbirine 60 metreden daha yakın bitişik parsellerde gereksiz zikzak yapmamak için kontrol et,
+      // ancak mahalle adı farklıysa veya aralarında mesafe varsa mutlaka rotaya durak olarak ekle!
+      const distFromPrevKm = prev
+        ? calculateHaversineKm(prev.lat, prev.lng, st.lat, st.lng)
+        : 999;
+      const isDifferentNeighborhood =
+        !prev?.neighborhood ||
+        normalizeMahalleKey(prev.neighborhood) !==
+          normalizeMahalleKey(st.neighborhood);
+
+      if (distFromPrevKm >= 0.06 || isDifferentNeighborhood) {
+        points.push({
+          lat: st.lat,
+          lng: st.lng,
+          label: st.label,
+          esasNo: rec.esasNo,
+          neighborhood: st.neighborhood,
+        });
+      }
+    }
+  }
+
+  return points;
 }
 
 /**

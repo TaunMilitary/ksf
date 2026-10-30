@@ -7,6 +7,7 @@ import {
   FileText,
   Trash2,
   Share2,
+  Pencil,
   Sun,
   CloudSun,
   Cloud,
@@ -37,6 +38,7 @@ interface CalendarViewProps {
   onAddForDate: (date: string) => void;
   onOpenOnMap: (date: string) => void;
   onShareDailyRoute?: (date: string) => void;
+  onEditRecord?: (record: InspectionRecord) => void;
   onUpdateStatus: (id: string, status: InspectionStatus) => void;
   onDeleteRecord: (id: string) => void;
 }
@@ -88,6 +90,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   onAddForDate,
   onOpenOnMap,
   onShareDailyRoute,
+  onEditRecord,
   onUpdateStatus,
   onDeleteRecord,
 }) => {
@@ -384,13 +387,26 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                         <span className="font-mono font-semibold text-slate-900 tabular-nums">
                           {idx + 1}. Durak · Saat {rec.time} · {rec.esasNo}
                         </span>
-                        <button
-                          onClick={() => onDeleteRecord(rec.id)}
-                          className="text-slate-400 hover:text-red-600"
-                          title="Keşfi Sil"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          {onEditRecord && (
+                            <button
+                              type="button"
+                              onClick={() => onEditRecord(rec)}
+                              className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-900 hover:bg-amber-100"
+                              title="Keşif detaylarını düzenle"
+                            >
+                              <Pencil className="h-3 w-3" />
+                              <span>Düzenle</span>
+                            </button>
+                          )}
+                          <button
+                            onClick={() => onDeleteRecord(rec.id)}
+                            className="text-slate-400 hover:text-red-600 p-0.5"
+                            title="Keşfi Sil"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       </div>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
                         <span
@@ -466,7 +482,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                                   key={p.id || pIdx}
                                   className="rounded bg-white/90 border border-amber-300 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-amber-950"
                                 >
-                                  {pIdx + 1}) {p.adaNo}/{p.parselNo}
+                                  {pIdx + 1}){" "}
+                                  {p.neighborhood
+                                    ? `${p.neighborhood.replace(/\s+Mahallesi$/i, "")} `
+                                    : ""}
+                                  {p.adaNo}/{p.parselNo}
                                   {p.yuzolcumuM2
                                     ? ` (${formatAreaM2(p.yuzolcumuM2)} m²)`
                                     : ""}

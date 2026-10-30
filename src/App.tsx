@@ -42,6 +42,7 @@ import {
   Globe,
   ShieldCheck,
   KeyRound,
+  Pencil,
 } from "lucide-react";
 import {
   ActiveTab,
@@ -78,6 +79,7 @@ import {
   buildDailyRoutePoints,
   calculateOSRMRoute,
   detectClientDeviceInfo,
+  extractRecordLocationStops,
   fetchNearbyTkgmParcels,
   fetchTkgmParcelByCoordinate,
   findSmartRouteSuggestions,
@@ -87,9 +89,11 @@ import {
   formatLongDateTR,
   formatUserProfileCreator,
   formatVehicleLabel,
+  getRecordUniqueNeighborhoods,
   NominatimSearchResult,
   parseTkgmGeoJson,
   queryParcelBoundary,
+  resolveNeighborhoodCoordinates,
   reverseGeocodeFatsaPoint,
   searchFatsaLocations,
 } from "./services/geoService";
@@ -110,6 +114,7 @@ import {
   syncPushToActiveCloud,
 } from "./components/CloudSyncModal";
 import { MultiRouteAdvisorView } from "./components/MultiRouteAdvisorView";
+import { EditInspectionModal } from "./components/EditInspectionModal";
 import {
   GitHubPublishResult,
   publishProjectToGitHubPagesKsf,
@@ -243,17 +248,11 @@ export default function App() {
   const [rememberDeviceAuth, setRememberDeviceAuth] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // GitHub 'ksf' Repo & GitHub Pages Yayınlama State (Önizleme ortamında doğrudan açık başlar, GitHub Pages'te kapalı başlar)
-  const [isPublishModalOpen, setIsPublishModalOpen] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    if (
-      window.location.protocol === "file:" ||
-      window.location.hostname.endsWith("github.io")
-    ) {
-      return false;
-    }
-    return true;
-  });
+  // GitHub 'ksf' Repo & GitHub Pages Yayınlama State
+  const [isPublishModalOpen, setIsPublishModalOpen] = useState<boolean>(false);
+  // Kayıtlı Keşif Düzenleme Modalı State
+  const [editingInspection, setEditingInspection] =
+    useState<InspectionRecord | null>(null);
   const [publishToken, setPublishToken] = useState<string>(() => {
     try {
       return (
@@ -597,16 +596,49 @@ export default function App() {
   const [aiAnalysisResult, setAiAnalysisResult] = useState<string | null>(null);
   const [formBannerMessage, setFormBannerMessage] = useState<string | null>(null);
 
-  // Compute OSRM distance & duration whenever selectedLat / selectedLng changes
+  // Compute OSRM distance & duration whenever selectedLat / selectedLng or multi-neighborhood formParcels change
   useEffect(() => {
     let cancelled = false;
     async function runOsrm() {
       if (!selectedLat || !selectedLng) return;
       setOsrmLoading(true);
-      const res = await calculateOSRMRoute([
+
+      // Eğer dosyaya birden fazla mahalle / parsel eklendiyse tüm mahalle duraklarını sırayla rotaya dahil et
+      const routeWaypoints: { lat: number; lng: number }[] = [
         { lat: FATSA_COURTHOUSE.lat, lng: FATSA_COURTHOUSE.lng },
-        { lat: selectedLat, lng: selectedLng },
-      ]);
+      ];
+
+      if (subjectType === "tasinmaz" && formParcels.length > 0) {
+        const tempStops = extractRecordLocationStops({
+          district: formDistrict,
+          neighborhood: neighborhoodInput,
+          lat: selectedLat,
+          lng: selectedLng,
+          parcels: formParcels,
+        });
+        for (const st of tempStops) {
+          const dup = routeWaypoints.some(
+            (w) =>
+              Math.abs(w.lat - st.lat) < 0.0004 &&
+              Math.abs(w.lng - st.lng) < 0.0004
+          );
+          if (!dup) {
+            routeWaypoints.push({ lat: st.lat, lng: st.lng });
+          }
+        }
+      }
+
+      const hasCurrentPoint = routeWaypoints.some(
+        (w, i) =>
+          i > 0 &&
+          Math.abs(w.lat - selectedLat) < 0.0004 &&
+          Math.abs(w.lng - selectedLng) < 0.0004
+      );
+      if (!hasCurrentPoint) {
+        routeWaypoints.push({ lat: selectedLat, lng: selectedLng });
+      }
+
+      const res = await calculateOSRMRoute(routeWaypoints);
       if (!cancelled) {
         setDistanceKm(res.distanceKm);
         setDurationMin(res.durationMin);
@@ -618,7 +650,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [selectedLat, selectedLng]);
+  }, [selectedLat, selectedLng, formParcels, subjectType, formDistrict, neighborhoodInput]);
 
   // Compute Weather Forecast for selected location & date in the form
   useEffect(() => {
@@ -644,6 +676,9 @@ export default function App() {
 
     const cleanAda = adaNo.trim();
     const cleanParsel = parselNo.trim();
+    // Parsel numarası değişirken eski komşu parsel önerilerini temizle (Örn: 13 yazarken 1'den kalan önerilerin karışmasını engeller)
+    setNearbyParcelSuggestions([]);
+
     // Parsel numarası girilmeden TKGM sorgusu başlatma (Ada tek başına veya boşken sahte '1' parsel çekilmesini engeller)
     if (!cleanParsel) {
       setParcelPolygon([]);
@@ -662,7 +697,7 @@ export default function App() {
           baseLat: baseNeighborhoodLat,
           baseLng: baseNeighborhoodLng,
           adaNo: cleanAda || "0",
-          parselNo: cleanParsel || "1",
+          parselNo: cleanParsel,
           yuzolcumuM2:
             Number(yuzolcumuInput) > 0 ? Number(yuzolcumuInput) : undefined,
           keepExactCenter: false,
@@ -764,7 +799,7 @@ export default function App() {
           setIsQueryingParcel(false);
         }
       }
-    }, 380);
+    }, 550);
 
     return () => {
       cancelled = true;
@@ -837,20 +872,20 @@ export default function App() {
     return list;
   }, [formParcels, buildCurrentInputParcelItem]);
 
-  // Önerilen bir komşu parsele tıklandığında: eğer 1. parsel kutuda yazılıysa ve henüz listeye eklenmemişse önce 1. parseli korur, ardından tıklanan parseli ekler!
+  // Önerilen bir komşu parsele tıklandığında: eğer henüz listeye hiç parsel eklenmemişse (prev.length === 0) ve kutuda tam sorgulanmış 1. parsel varsa onu korur, ardından tıklanan parseli ekler
   const handleAddParcelItemToList = useCallback(
     (item: ParcelItem) => {
       setFormParcels((prev) => {
         const next = [...prev];
-        const currentInputItem = buildCurrentInputParcelItem();
-        if (currentInputItem) {
-          const currentExists = next.some(
-            (p) =>
-              (p.neighborhood || "") === (currentInputItem.neighborhood || "") &&
-              p.adaNo === currentInputItem.adaNo &&
-              p.parselNo === currentInputItem.parselNo
-          );
-          if (!currentExists) {
+        if (next.length === 0 && !isQueryingParcel) {
+          const currentInputItem = buildCurrentInputParcelItem();
+          if (
+            currentInputItem &&
+            !(
+              currentInputItem.adaNo === item.adaNo &&
+              currentInputItem.parselNo === item.parselNo
+            )
+          ) {
             next.push(currentInputItem);
           }
         }
@@ -865,6 +900,9 @@ export default function App() {
         }
         return next;
       });
+      setParselNo("");
+      setYuzolcumuInput("");
+      setPaftaNo("");
       setFocusParcelZoomTrigger((c) => c + 1);
       setFormBannerMessage(
         `✓ ${item.adaNo} Ada / ${item.parselNo} Parsel (${formatAreaM2(
@@ -873,7 +911,7 @@ export default function App() {
       );
       setTimeout(() => setFormBannerMessage(null), 3500);
     },
-    [buildCurrentInputParcelItem]
+    [buildCurrentInputParcelItem, isQueryingParcel]
   );
 
   // Mevcut input'taki parseli çoklu parsel listesine ekle (Önceki eklenen parselleri korur ve yeni parsel girişi için Parsel No kutusunu hazırlar)
@@ -1494,11 +1532,12 @@ export default function App() {
       const finalPolygon =
         parcelPolygon && parcelPolygon.length >= 3 ? parcelPolygon : undefined;
 
-      // Ensure both previously added formParcels AND the active input parcel (if any) are preserved in order (1st, 2nd, 3rd...)
+      // ÖNEMLİ DÜZELTME: Sadece Parsel No kutusunda gerçek bir parsel numarası (cleanParsel) yazılıysa listeye ekle!
+      // Ada No yazılı olup Parsel No boş olduğunda (örn. 137/13 eklendikten sonra Ada kutusunda 137 kaldığında) asla '137/1' üretme!
       const finalParcelsList: ParcelItem[] = [...formParcels];
-      if (cleanAda || cleanParsel) {
+      if (cleanParsel) {
         const currentKeyAda = cleanAda || "0";
-        const currentKeyParsel = cleanParsel || "1";
+        const currentKeyParsel = cleanParsel;
         const hasCurrent = finalParcelsList.some(
           (p) =>
             (p.neighborhood || "") === neighborhoodInput.trim() &&
@@ -1530,13 +1569,23 @@ export default function App() {
         0
       );
 
+      // Dosyada birden fazla mahalle varsa tüm mahalle adlarını birleştir (Örn: "Saraytepe Mahallesi / Ilıca Mahallesi")
+      const allUniqueNeighborhoods = getRecordUniqueNeighborhoods({
+        neighborhood: neighborhoodInput.trim(),
+        parcels: finalParcelsList,
+      });
+      const combinedNeighborhoodDisplay =
+        allUniqueNeighborhoods.length > 0
+          ? allUniqueNeighborhoods.join(" / ")
+          : neighborhoodInput.trim();
+
       newRecord = {
         id: `kesif-${Date.now()}`,
         esasNo: esasNo.trim(),
         district: formDistrict,
-        neighborhood: neighborhoodInput.trim(),
+        neighborhood: combinedNeighborhoodDisplay,
         subjectType: "tasinmaz",
-        tkgmMahalleId: selectedTkgmMahalleId,
+        tkgmMahalleId: primaryParcel?.mahalleId || selectedTkgmMahalleId,
         adaNo: primaryParcel?.adaNo || cleanAda,
         parselNo: primaryParcel?.parselNo || cleanParsel,
         nitelik: primaryParcel?.nitelik || nitelik.trim() || undefined,
@@ -1608,6 +1657,34 @@ export default function App() {
       `${newRecord.district} - ${newRecord.esasNo} sayılı dosya (${newRecord.neighborhood}${summaryBadge}) ${formatDateTR(
         newRecord.date
       )} günü saat ${newRecord.time} için [${finalCreator}] tarafından kaydedildi.`
+    );
+    setTimeout(() => setFormBannerMessage(null), 5000);
+  };
+
+  // Verilmiş (kayıtlı) bir keşfin tüm detaylarını düzenleyip kaydetme
+  const handleSaveEditedInspection = (updatedRecord: InspectionRecord) => {
+    const updatedList = inspections.map((rec) =>
+      rec.id === updatedRecord.id ? updatedRecord : rec
+    );
+    setInspections(updatedList);
+    pushRecordsToCloudIfEnabled(updatedList);
+    setEditingInspection(null);
+
+    const parcelSummary =
+      updatedRecord.subjectType === "arac"
+        ? ` [🚗 Araç: ${updatedRecord.vehicleInfo?.plateNo || ""}]`
+        : updatedRecord.parcels && updatedRecord.parcels.length > 0
+        ? ` [📐 ${updatedRecord.parcels
+            .map((p) => `${p.adaNo}/${p.parselNo}`)
+            .join(", ")}]`
+        : updatedRecord.adaNo && updatedRecord.parselNo
+        ? ` [📐 ${updatedRecord.adaNo}/${updatedRecord.parselNo}]`
+        : "";
+
+    setFormBannerMessage(
+      `✓ ${updatedRecord.esasNo} sayılı keşif dosyası (${updatedRecord.neighborhood}${parcelSummary} · ${formatDateTR(
+        updatedRecord.date
+      )} ${updatedRecord.time}) başarıyla güncellendi.`
     );
     setTimeout(() => setFormBannerMessage(null), 5000);
   };
@@ -1854,10 +1931,10 @@ export default function App() {
         (dayRecords.length > 1 ? (dayRecords.length - 1) * 9 : 0)
     );
 
-    // Çok duraklı Google Maps Yol Tarifi URL'si (Çıkış: Fatsa Adliyesi -> Durak 1..N -> Varış: Fatsa Adliyesi)
+    // Çok duraklı Google Maps Yol Tarifi URL'si (Bir dosyada birden fazla mahalle varsa tüm mahalle duraklarını sırayla ekler)
+    const dailyWaypoints = buildDailyRoutePoints(dayRecords);
     const coordChain = [
-      `${FATSA_COURTHOUSE.lat},${FATSA_COURTHOUSE.lng}`,
-      ...dayRecords.map((r) => `${r.lat},${r.lng}`),
+      ...dailyWaypoints.map((w) => `${w.lat},${w.lng}`),
       `${FATSA_COURTHOUSE.lat},${FATSA_COURTHOUSE.lng}`,
     ].join("/");
     const googleMapsUrl = `https://www.google.com/maps/dir/${coordChain}`;
@@ -1877,6 +1954,9 @@ export default function App() {
       const cMeta = getCaseTypeVisualMeta(rec.caseType);
       const vehicleLabel = formatVehicleLabel(rec);
       const adaParselLabel = formatAdaParselLabel(rec);
+      const uniqueMahs = getRecordUniqueNeighborhoods(rec);
+      const mahalleLabel =
+        uniqueMahs.length > 1 ? uniqueMahs.join(" → ") : rec.neighborhood;
       const subjectStr = vehicleLabel
         ? ` | 🚗 Araç: ${vehicleLabel}${
             rec.vehicleInfo?.damageSummary
@@ -1892,12 +1972,16 @@ export default function App() {
         `📍 *${idx + 1}. DURAK — Saat ${rec.time} | Dosya No: ${rec.esasNo}*`
       );
       lines.push(
-        `   • *Varış / Konum:* [${rec.district}] ${rec.neighborhood}${subjectStr}`
+        `   • *Varış / Mahalle(ler):* [${rec.district}] ${mahalleLabel}${subjectStr}`
       );
       if (rec.parcels && rec.parcels.length > 1) {
         lines.push(
           `   • *Dosyadaki Parseller (${rec.parcels.length} Adet):* ${rec.parcels
-            .map((p) => `${p.adaNo}/${p.parselNo}`)
+            .map((p) =>
+              p.neighborhood
+                ? `${p.neighborhood} ${p.adaNo}/${p.parselNo}`
+                : `${p.adaNo}/${p.parselNo}`
+            )
             .join(", ")}`
         );
       }
@@ -2060,7 +2144,7 @@ export default function App() {
       return;
     }
     try {
-      if (localStorage.getItem("fatsa_ksf_autopublish_v7") === "done") return;
+      if (localStorage.getItem("fatsa_ksf_autopublish_v8") === "done") return;
     } catch {
       return;
     }
@@ -2083,7 +2167,7 @@ export default function App() {
           setPublishResult(res);
           setPublishProgress(null);
           try {
-            localStorage.setItem("fatsa_ksf_autopublish_v7", "done");
+            localStorage.setItem("fatsa_ksf_autopublish_v8", "done");
             localStorage.setItem(STORAGE_KEY_PUBLISHED_KSF, JSON.stringify(res));
           } catch {
             // ignore
@@ -3682,12 +3766,17 @@ export default function App() {
                         <div className="flex flex-wrap items-center gap-1.5">
                           {formParcels.map((p, idx) => (
                             <div
-                              key={`${p.adaNo}-${p.parselNo}-${idx}`}
+                              key={`${p.neighborhood || ""}-${p.adaNo}-${p.parselNo}-${idx}`}
                               className="inline-flex items-center gap-1.5 rounded-md border border-amber-400 bg-white px-2 py-1 text-xs shadow-2xs"
                             >
                               <span className="rounded bg-amber-600 px-1.5 py-0.2 font-mono text-[10px] font-bold text-white">
                                 {idx + 1}. Parsel
                               </span>
+                              {p.neighborhood && (
+                                <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">
+                                  {p.neighborhood.replace(/\s+Mahallesi$/i, "")}
+                                </span>
+                              )}
                               <button
                                 type="button"
                                 onClick={() => {
@@ -3749,10 +3838,14 @@ export default function App() {
                           <span className="ml-1.5 font-mono text-xs text-amber-700">
                             ({formParcels.length} Parsel)
                           </span>
+                        ) : formParcels.length === 1 && !parselNo.trim() ? (
+                          <span className="ml-1.5 font-mono text-xs text-amber-700">
+                            ({formParcels[0].adaNo} Ada / {formParcels[0].parselNo} Parsel)
+                          </span>
                         ) : (
-                          (adaNo || parselNo) && (
+                          parselNo.trim() && (
                             <span className="ml-1.5 font-mono text-xs text-amber-700">
-                              ({adaNo || "0"} Ada / {parselNo || "1"} Parsel)
+                              ({adaNo.trim() || "0"} Ada / {parselNo.trim()} Parsel)
                             </span>
                           )
                         )}
@@ -4477,7 +4570,11 @@ export default function App() {
                                               key={p.id || pIdx}
                                               className="rounded bg-white border border-amber-300 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-amber-950"
                                             >
-                                              {pIdx + 1}. Parsel: {p.adaNo}/{p.parselNo}
+                                              {pIdx + 1}. Parsel:{" "}
+                                              {p.neighborhood
+                                                ? `${p.neighborhood.replace(/\s+Mahallesi$/i, "")} `
+                                                : ""}
+                                              {p.adaNo}/{p.parselNo}
                                               {p.yuzolcumuM2
                                                 ? ` (${formatAreaM2(p.yuzolcumuM2)} m²)`
                                                 : ""}
@@ -4544,7 +4641,16 @@ export default function App() {
                                   ))}
                                 </div>
 
-                                <div className="flex items-center gap-1.5">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingInspection(rec)}
+                                    className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-950 hover:bg-amber-100 whitespace-nowrap"
+                                    title="Bu keşfin tüm detaylarını (tarih, saat, parseller, bilirkişi, notlar) düzenle"
+                                  >
+                                    <Pencil className="h-3 w-3 text-amber-700" />
+                                    <span>Düzenle</span>
+                                  </button>
                                   <button
                                     onClick={() =>
                                       handleOpenNewInspectionTab({
@@ -4596,6 +4702,7 @@ export default function App() {
               setActiveTab("harita");
             }}
             onShareDailyRoute={(d) => setShareRouteDate(d)}
+            onEditRecord={(rec) => setEditingInspection(rec)}
             onUpdateStatus={(id, st) => handleUpdateInspectionStatus(id, st)}
             onDeleteRecord={handleDeleteInspection}
           />
@@ -4724,38 +4831,50 @@ export default function App() {
                 ).map((rec) => {
                   const isSelected = focusedInspectionId === rec.id;
                   return (
-                    <button
+                    <div
                       key={rec.id}
-                      type="button"
-                      onClick={() =>
-                        setFocusedInspectionId(isSelected ? null : rec.id)
-                      }
-                      className={`rounded-lg border px-2.5 py-1 text-left text-xs transition-colors ${
+                      className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs transition-colors ${
                         isSelected
                           ? "border-amber-600 bg-amber-50 text-amber-950 font-bold"
                           : "border-slate-200 bg-slate-50 text-slate-700 hover:border-amber-400"
                       }`}
                     >
-                      {rec.subjectType === "arac" && rec.vehicleInfo?.plateNo ? (
-                        <span className="font-mono font-bold text-indigo-800">
-                          🚗 {rec.vehicleInfo.plateNo}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFocusedInspectionId(isSelected ? null : rec.id)
+                        }
+                        className="text-left"
+                      >
+                        {rec.subjectType === "arac" && rec.vehicleInfo?.plateNo ? (
+                          <span className="font-mono font-bold text-indigo-800">
+                            🚗 {rec.vehicleInfo.plateNo}
+                          </span>
+                        ) : rec.parcels && rec.parcels.length > 1 ? (
+                          <span className="font-mono font-bold text-amber-800">
+                            📐 {rec.parcels.length} Parsel ({rec.parcels[0].adaNo}/{rec.parcels[0].parselNo}+)
+                          </span>
+                        ) : (
+                          <span className="font-mono font-bold text-amber-800">
+                            📐 {rec.adaNo || "0"}/{rec.parselNo || "1"}
+                          </span>
+                        )}{" "}
+                        <span>
+                          [{rec.district}] {rec.neighborhood.replace(" Mahallesi", "")}
+                        </span>{" "}
+                        <span className="text-[11px] text-slate-500">
+                          ({rec.esasNo})
                         </span>
-                      ) : rec.parcels && rec.parcels.length > 1 ? (
-                        <span className="font-mono font-bold text-amber-800">
-                          📐 {rec.parcels.length} Parsel ({rec.parcels[0].adaNo}/{rec.parcels[0].parselNo}+)
-                        </span>
-                      ) : (
-                        <span className="font-mono font-bold text-amber-800">
-                          📐 {rec.adaNo || "0"}/{rec.parselNo || "1"}
-                        </span>
-                      )}{" "}
-                      <span>
-                        [{rec.district}] {rec.neighborhood.replace(" Mahallesi", "")}
-                      </span>{" "}
-                      <span className="text-[11px] text-slate-500">
-                        ({rec.esasNo})
-                      </span>
-                    </button>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingInspection(rec)}
+                        className="ml-1 rounded border border-amber-300 bg-white px-1.5 py-0.5 text-[10px] font-bold text-amber-900 hover:bg-amber-100"
+                        title="Keşfi Düzenle"
+                      >
+                        Düzenle
+                      </button>
+                    </div>
                   );
                 })}
               </div>
@@ -5495,6 +5614,15 @@ export default function App() {
             return Array.from(map.values());
           });
         }}
+      />
+
+      {/* ====================================================================
+          VERİLMİŞ KEŞİFLERİ DÜZENLEME MODALI (TÜM DETAYLAR DEĞİŞTİRİLEBİLİR)
+         ==================================================================== */}
+      <EditInspectionModal
+        record={editingInspection}
+        onClose={() => setEditingInspection(null)}
+        onSave={handleSaveEditedInspection}
       />
 
       {/* ====================================================================
