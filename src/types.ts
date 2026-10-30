@@ -149,7 +149,14 @@ export interface CloudSyncConfig {
   lastSyncAt: string | null;
 }
 
-export type ActiveTab = "ajanda" | "takvim" | "harita" | "yeni_kesif" | "ayarlar";
+export type ActiveTab =
+  | "ajanda"
+  | "takvim"
+  | "harita"
+  | "yeni_kesif"
+  | "ai_rota"
+  | "ayarlar";
+
 
 export type PdfExportPeriod = "daily" | "weekly" | "monthly";
 

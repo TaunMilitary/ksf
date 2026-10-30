@@ -95,8 +95,13 @@ export async function publishProjectToGitHubPagesKsf(
         throw new Error(data.error);
       }
     } catch (err: any) {
-      // Eğer sunucu hata mesajı döndürdüyse (ör. geçersiz token) doğrudan ilet
-      if (err?.message && (err.message.includes("Token") || err.message.includes("GitHub") || err.message.includes("401") || err.message.includes("403"))) {
+      // Sadece kimlik doğrulama (401/403) hatası varsa doğrudan fırlat; diğer tüm durumlarda tarayıcı üzerinden doğrudan GitHub API'ye geç
+      if (
+        err?.message &&
+        (err.message.includes("HTTP 401") ||
+          err.message.includes("HTTP 403") ||
+          err.message.includes("kimlik doğrulaması başarısız"))
+      ) {
         throw err;
       }
       // Aksi halde tarayıcı tabanlı doğrudan GitHub REST API yedek yöntemine geç
@@ -252,42 +257,129 @@ jobs:
 
   onProgress?.(`Dosyalar '${owner}/${cleanRepo}' (${defaultBranch}) deposuna yükleniyor...`);
 
-  for (const file of filesToUpload) {
-    const contentApiUrl = `https://api.github.com/repos/${owner}/${cleanRepo}/contents/${file.path}`;
-    let existingSha: string | undefined;
-    try {
-      const getFileRes = await fetch(
-        `${contentApiUrl}?ref=${encodeURIComponent(defaultBranch)}&_t=${Date.now()}`,
-        { headers }
-      );
-      if (getFileRes.ok) {
-        const fData = await getFileRes.json();
-        existingSha = fData.sha;
+  // Git Data API (Blobs -> Tree -> Commit -> Ref) ile 1MB üstü standalone-bundle.js dahil tüm dosyaları tek commit'te yükle
+  let latestCommitSha = "";
+  let baseTreeSha = "";
+  try {
+    const refRes = await fetch(
+      `https://api.github.com/repos/${owner}/${cleanRepo}/git/ref/heads/${encodeURIComponent(defaultBranch)}?_t=${Date.now()}`,
+      { headers }
+    );
+    if (refRes.ok) {
+      const refData = await refRes.json();
+      latestCommitSha = refData?.object?.sha || "";
+      if (latestCommitSha) {
+        const commitRes = await fetch(
+          `https://api.github.com/repos/${owner}/${cleanRepo}/git/commits/${latestCommitSha}`,
+          { headers }
+        );
+        if (commitRes.ok) {
+          const commitData = await commitRes.json();
+          baseTreeSha = commitData?.tree?.sha || "";
+        }
       }
-    } catch {
-      // dosya henüz yok
     }
+  } catch {
+    // ignore
+  }
 
-    const putBody: Record<string, any> = {
-      message: `Yayın güncellemesi: ${file.path}`,
-      content: encodeUtf8Base64(file.content),
-      branch: defaultBranch,
-    };
-    if (existingSha) putBody.sha = existingSha;
+  const treeEntries: {
+    path: string;
+    mode: "100644";
+    type: "blob";
+    sha: string;
+  }[] = [];
 
-    const putRes = await fetch(contentApiUrl, {
-      method: "PUT",
-      headers,
-      body: JSON.stringify(putBody),
-    });
-    if (!putRes.ok) {
-      const errJson = await putRes.json().catch(() => ({}));
+  for (const file of filesToUpload) {
+    const blobRes = await fetch(
+      `https://api.github.com/repos/${owner}/${cleanRepo}/git/blobs`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          content: encodeUtf8Base64(file.content),
+          encoding: "base64",
+        }),
+      }
+    );
+    if (!blobRes.ok) {
+      const errJson = await blobRes.json().catch(() => ({}));
       throw new Error(
-        `'${file.path}' yüklenemedi (HTTP ${putRes.status}): ${
+        `'${file.path}' paketi yüklenemedi (HTTP ${blobRes.status}): ${
           errJson.message || "Yazma yetkisini kontrol edin."
         }`
       );
     }
+    const blobData = await blobRes.json();
+    treeEntries.push({
+      path: file.path,
+      mode: "100644",
+      type: "blob",
+      sha: blobData.sha,
+    });
+  }
+
+  const treeBody: Record<string, any> = { tree: treeEntries };
+  if (baseTreeSha) treeBody.base_tree = baseTreeSha;
+
+  const treeRes = await fetch(
+    `https://api.github.com/repos/${owner}/${cleanRepo}/git/trees`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify(treeBody),
+    }
+  );
+  if (!treeRes.ok) {
+    const errJson = await treeRes.json().catch(() => ({}));
+    throw new Error(
+      `Git ağacı oluşturulamadı (HTTP ${treeRes.status}): ${
+        errJson.message || "Yazma yetkisini kontrol edin."
+      }`
+    );
+  }
+  const treeData = await treeRes.json();
+
+  const newCommitRes = await fetch(
+    `https://api.github.com/repos/${owner}/${cleanRepo}/git/commits`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        message: `Fatsa Sulh Hukuk Keşif Planlayıcı - Sistem Güncellemesi (${new Date().toLocaleString("tr-TR")})`,
+        tree: treeData.sha,
+        parents: latestCommitSha ? [latestCommitSha] : [],
+      }),
+    }
+  );
+  if (!newCommitRes.ok) {
+    const errJson = await newCommitRes.json().catch(() => ({}));
+    throw new Error(
+      `Commit oluşturulamadı (HTTP ${newCommitRes.status}): ${
+        errJson.message || "Yazma yetkisini kontrol edin."
+      }`
+    );
+  }
+  const newCommitData = await newCommitRes.json();
+
+  const updateRefRes = await fetch(
+    `https://api.github.com/repos/${owner}/${cleanRepo}/git/refs/heads/${encodeURIComponent(defaultBranch)}`,
+    {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({
+        sha: newCommitData.sha,
+        force: true,
+      }),
+    }
+  );
+  if (!updateRefRes.ok) {
+    const errJson = await updateRefRes.json().catch(() => ({}));
+    throw new Error(
+      `Dal (branch) güncellenemedi (HTTP ${updateRefRes.status}): ${
+        errJson.message || "Yazma yetkisini kontrol edin."
+      }`
+    );
   }
 
   // .github/workflows/deploy.yml dosyasını güncelle (token'da workflow izni varsa)

@@ -138,6 +138,63 @@ Lütfen hangi dosyaların hangi sırayla gezilmesi gerektiğini, tahmini zaman t
     }
   });
 
+  // Multi-Neighborhood / Multi-Parcel Route & Day-by-Day AI Scheduling Advisor Endpoint
+  app.post("/api/ai-multi-route-advice", async (req, res) => {
+    try {
+      const { candidates, recommendedDays, existingInspections } = req.body || {};
+
+      if (
+        !process.env.GEMINI_API_KEY ||
+        process.env.GEMINI_API_KEY === "MY_GEMINI_API_KEY"
+      ) {
+        const dayCount = Array.isArray(recommendedDays) ? recommendedDays.length : 1;
+        const itemCount = Array.isArray(candidates) ? candidates.length : 0;
+        return res.json({
+          summary: `Fatsa Adliyesi merkezli CBS ve koridor analizine göre girilen ${itemCount} adet taşınmaz/mahalle noktası, coğrafi yakınlık ve yol koridorlarına göre ${dayCount} ayrı keşif gününe optimize edilmiştir. Aynı vadi veya sahil hattındaki dosyaların ardışık saatlerde (13:00'dan itibaren 40-45'er dakika arayla) icra edilmesi, mahkeme heyeti ve bilirkişi ulaşım süresinde maksimum tasarruf sağlar.`,
+        });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey: process.env.GEMINI_API_KEY,
+        httpOptions: {
+          headers: {
+            "User-Agent": "aistudio-build",
+          },
+        },
+      });
+
+      const prompt = `Sen Ordu İli Fatsa Adliyesi Sulh Hukuk Mahkemesi (Fatsa, Çamaş ve Çatalpınar yargı çevresi) için çalışan bir Akıllı Keşif, CBS ve Güzergah Optimizasyon Uzmanısın.
+Kullanıcı birden fazla mahalle, köy ve ada/parsel bilgisi girdi ve sistem bunları coğrafi koridorlara göre günlere ayırdı.
+
+Merkez Çıkış Noktası: Fatsa Adliyesi (41.0287, 37.5008)
+Kullanıcının Girdiği Çoklu Mahalle / Parsel Listesi: ${JSON.stringify(candidates || [])}
+Mevcut Kayıtlı Keşif Günleri: ${JSON.stringify(existingInspections || [])}
+Hesaplanan Gün Bazlı Rota Grupları: ${JSON.stringify(recommendedDays || [])}
+
+Lütfen hakim ve kalem personeli için:
+1. Girilen mahalle ve parsellerin neden bu şekilde günlere ve gruplara ayrıldığını (hangi koridorların birleştirildiğini),
+2. Mevcut keşif günleriyle birleştirilebilecek olanları ve yeni açılması önerilen günleri,
+3. Her bir gün için Fatsa Adliyesi çıkışlı en verimli durak sırasını, saat planlamasını ve bilirkişi/araç organizasyonu tavsiyesini
+kurumsal, net ve maddeler halinde Türkçe olarak yaz.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.8-flash",
+        contents: prompt,
+      });
+
+      return res.json({
+        summary: response.text || "Çoklu mahalle ve parsel rota tavsiyesi oluşturuldu.",
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Bilinmeyen hata";
+      return res.status(500).json({
+        error: "Çoklu mahalle/parsel yapay zeka analizi sırasında hata oluştu.",
+        details: message,
+      });
+    }
+  });
+
+
   // Cloud Sync Proxy for Google Apps Script Web App URL (avoids browser CORS redirect issues)
   app.post("/api/cloud-sync", async (req, res) => {
     try {
@@ -232,14 +289,17 @@ Lütfen hangi dosyaların hangi sırayla gezilmesi gerektiğini, tahmini zaman t
         });
       }
 
-      // 1. Ensure standalone-bundle.js is freshly compiled with latest source
-      try {
-        execSync(
-          'npx esbuild src/main.tsx --bundle --format=iife --platform=browser --target=es2020 --minify --define:process.env.NODE_ENV=\'"production"\' --outfile=standalone-bundle.js',
-          { cwd: __dirname, stdio: "ignore" }
-        );
-      } catch {
-        // continue with existing bundle if esbuild fails
+      // 1. Ensure standalone-bundle.js exists (rebuild only if missing or empty)
+      const bundlePath = path.join(__dirname, "standalone-bundle.js");
+      if (!fs.existsSync(bundlePath) || fs.statSync(bundlePath).size < 50000) {
+        try {
+          execSync(
+            'npx esbuild src/main.tsx --bundle --format=iife --platform=browser --target=es2020 --minify --loader:.css=empty --define:process.env.NODE_ENV=\'"production"\' --outfile=standalone-bundle.js',
+            { cwd: __dirname, stdio: "ignore" }
+          );
+        } catch {
+          // continue with existing bundle if esbuild fails
+        }
       }
 
       const ghHeaders: Record<string, string> = {
@@ -421,16 +481,44 @@ Lütfen hangi dosyaların hangi sırayla gezilmesi gerektiğini, tahmini zaman t
         latestCommitSha = refData.object?.sha || "";
       }
 
-      // 6. Create clean Git Tree (without base_tree so old bun.lock / .env.example files are removed)
-      const buildTreeItems = (includeWorkflows: boolean) =>
-        filesToPush
-          .filter((f) => includeWorkflows || !f.path.startsWith(".github/"))
-          .map((f) => ({
+      // 6. Create Git Blobs in parallel for larger files (>30KB) so POST /git/trees is fast and never hits GitHub inline payload size limits
+      const treeItemsWithBlobs = await Promise.all(
+        filesToPush.map(async (f) => {
+          if (Buffer.byteLength(f.content, "utf-8") > 30000) {
+            const blobRes = await fetch(
+              `https://api.github.com/repos/${owner}/${cleanRepo}/git/blobs`,
+              {
+                method: "POST",
+                headers: ghHeaders,
+                body: JSON.stringify({
+                  content: Buffer.from(f.content, "utf-8").toString("base64"),
+                  encoding: "base64",
+                }),
+              }
+            );
+            if (blobRes.ok) {
+              const blobData = (await blobRes.json()) as { sha: string };
+              return {
+                path: f.path,
+                mode: "100644" as const,
+                type: "blob" as const,
+                sha: blobData.sha,
+              };
+            }
+          }
+          return {
             path: f.path,
-            mode: "100644",
-            type: "blob",
+            mode: "100644" as const,
+            type: "blob" as const,
             content: f.content,
-          }));
+          };
+        })
+      );
+
+      const buildTreeItems = (includeWorkflows: boolean) =>
+        treeItemsWithBlobs.filter(
+          (f) => includeWorkflows || !f.path.startsWith(".github/")
+        );
 
       let createTreeRes = await fetch(
         `https://api.github.com/repos/${owner}/${cleanRepo}/git/trees`,
@@ -471,7 +559,7 @@ Lütfen hangi dosyaların hangi sırayla gezilmesi gerektiğini, tahmini zaman t
             method: "POST",
             headers: ghHeaders,
             body: JSON.stringify({
-              message: `Fatsa Sulh Hukuk Keşif Planlayıcı - GitHub Pages & Actions Onarımı (${new Date().toLocaleString("tr-TR")})`,
+              message: `Fatsa Sulh Hukuk Keşif Planlayıcı - Sistem Güncellemesi (${new Date().toLocaleString("tr-TR")})`,
               tree: treeSha,
               parents: latestCommitSha ? [latestCommitSha] : [],
             }),
@@ -573,6 +661,24 @@ Lütfen hangi dosyaların hangi sırayla gezilmesi gerektiğini, tahmini zaman t
       const message =
         err instanceof Error ? err.message : "GitHub yayınlama hatası";
       return res.status(500).json({ error: message });
+    }
+  });
+
+  app.get("/standalone-bundle.js", (_req, res) => {
+    const file = path.join(__dirname, "standalone-bundle.js");
+    if (fs.existsSync(file)) {
+      res.type("application/javascript").sendFile(file);
+    } else {
+      res.status(404).end();
+    }
+  });
+
+  app.get("/standalone-bundle.css", (_req, res) => {
+    const file = path.join(__dirname, "standalone-bundle.css");
+    if (fs.existsSync(file)) {
+      res.type("text/css").sendFile(file);
+    } else {
+      res.status(404).end();
     }
   });
 

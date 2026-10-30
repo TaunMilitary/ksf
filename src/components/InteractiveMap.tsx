@@ -187,15 +187,18 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     let parcelBounds: L.LatLngBounds | null = null;
     let targetMarker: L.Marker | null = null;
 
-    // Render additional multi-parcels added to the current form
+    // Render all parcels in selectedParcels (1st, 2nd, 3rd... parcel)
     if (selectedParcels && selectedParcels.length > 0) {
       selectedParcels.forEach((p, idx) => {
+        const strokeColor = idx === 0 ? "#ea580c" : "#0284c7";
+        const fillColor = idx === 0 ? "#f59e0b" : "#38bdf8";
+
         if (p.polygon && p.polygon.length >= 3) {
           const pPoly = L.polygon(p.polygon, {
-            color: idx === 0 ? "#ea580c" : "#0284c7",
+            color: strokeColor,
             weight: 3,
             opacity: 0.95,
-            fillColor: idx === 0 ? "#f59e0b" : "#38bdf8",
+            fillColor,
             fillOpacity: 0.34,
           }).addTo(layerGroup);
 
@@ -207,7 +210,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
           pPoly.bindPopup(`
             <div style="min-width:205px;">
-              <div style="font-size:10px;font-weight:700;color:#0369a1;">DOSYAYA EKLENEN ${idx + 1}. PARSEL</div>
+              <div style="font-size:10px;font-weight:700;color:${strokeColor};">DOSYADAKİ ${idx + 1}. PARSEL</div>
               <div style="font-size:14px;font-weight:800;color:#0f172a;margin-top:2px;">📐 ${p.adaNo} Ada / ${p.parselNo} Parsel</div>
               ${p.neighborhood ? `<div style="font-size:12px;color:#334155;">${p.neighborhood}</div>` : ""}
               ${p.nitelik ? `<div style="font-size:11px;color:#475569;margin-top:2px;">Nitelik: <strong>${p.nitelik}</strong></div>` : ""}
@@ -215,14 +218,30 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             </div>
           `);
         }
-      });
-    }
 
-    if (selectedParcelPolygon && selectedParcelPolygon.length >= 3) {
+        // Birden fazla parsel varsa her parselin merkezine numaralı parsel etiketi koy
+        if (selectedParcels.length > 1 && p.centerLat && p.centerLng) {
+          const badgeIcon = L.divIcon({
+            className: "custom-div-icon",
+            html: `
+              <div style="background:${strokeColor};color:#ffffff;font-size:10px;font-weight:800;font-family:monospace;padding:2px 6px;border-radius:5px;border:1.5px solid #ffffff;box-shadow:0 2px 6px rgba(0,0,0,0.3);white-space:nowrap;">
+                #${idx + 1}: ${p.adaNo}/${p.parselNo}
+              </div>
+            `,
+            iconSize: [90, 22],
+            iconAnchor: [45, 11],
+          });
+          L.marker([p.centerLat, p.centerLng], {
+            icon: badgeIcon,
+            zIndexOffset: 910 + idx,
+          }).addTo(layerGroup);
+        }
+      });
+    } else if (selectedParcelPolygon && selectedParcelPolygon.length >= 3) {
       const adaParselBadge =
         selectedParcelMeta?.adaNo || selectedParcelMeta?.parselNo
           ? `${selectedParcelMeta.adaNo || "0"} Ada / ${
-              selectedParcelMeta.parselNo || "1"
+              selectedParcelMeta.parselNo || ""
             } Parsel`
           : "Seçili Taşınmaz Sınırı";
       const areaVal =

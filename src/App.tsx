@@ -109,12 +109,18 @@ import {
   CloudSyncModal,
   syncPushToActiveCloud,
 } from "./components/CloudSyncModal";
+import { MultiRouteAdvisorView } from "./components/MultiRouteAdvisorView";
 import {
   GitHubPublishResult,
   publishProjectToGitHubPagesKsf,
 } from "./services/githubPagesPublisher";
 
 const STORAGE_KEY_RECORDS = "fatsa_adliyesi_kesif_kayitlari_v5";
+const LEGACY_RECORD_KEYS = [
+  "fatsa_adliyesi_kesif_kayitlari_v4",
+  "fatsa_adliyesi_kesif_kayitlari_v3",
+  "fatsa_kesif_records_v2",
+];
 const STORAGE_KEY_CLOUD = "fatsa_adliyesi_cloud_config_v2";
 const STORAGE_KEY_DEVICE_IDENTITY = "fatsa_adliyesi_device_identity_v1";
 const STORAGE_KEY_USER_PROFILE = "fatsa_adliyesi_user_profile_v1";
@@ -122,6 +128,15 @@ const STORAGE_KEY_AUTH_SESSION = "fatsa_adliyesi_auth_session_v1";
 const STORAGE_KEY_AUTH_REMEMBER = "fatsa_adliyesi_auth_remember_v1";
 const STORAGE_KEY_PUBLISHED_KSF = "fatsa_adliyesi_published_ksf_v1";
 const REQUIRED_APP_PASSWORD = "Fatsa2.SHM52";
+
+/**
+ * Varsayılan örnek veri kayıtlarını tespit eder (kullanıcının kendi girdiği keşifleri korur, örnek verileri ayıklar)
+ */
+function isSampleInspectionRecord(item: any): boolean {
+  if (!item || typeof item !== "object") return true;
+  const idStr = String(item.id || "");
+  return idStr.startsWith("fatsa-kesif-") || idStr.startsWith("sample-");
+}
 
 /**
  * Kayıtlarda ada/parsel metin içinde yazılmışsa ayrıştırır (sahte poligon üretmez)
@@ -148,20 +163,40 @@ function enrichLegacyRecord(item: any): InspectionRecord {
 }
 
 export default function App() {
-  // 1. State: Inspection Records (Seeded with genuine TKGM parcel boundaries for Fatsa, Çamaş & Çatalpınar)
+  // 1. State: Inspection Records (Kullanıcının girdiği gerçek verileri korur, örnek veri içermez)
   const [inspections, setInspections] = useState<InspectionRecord[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_RECORDS);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map(enrichLegacyRecord);
+        if (Array.isArray(parsed)) {
+          const userRecords = parsed
+            .filter((item) => !isSampleInspectionRecord(item))
+            .map(enrichLegacyRecord);
+          if (userRecords.length > 0) {
+            return userRecords;
+          }
+        }
+      }
+      // Fallback: eski anahtarlarda kullanıcı verisi varsa kurtar
+      for (const oldKey of LEGACY_RECORD_KEYS) {
+        const oldSaved = localStorage.getItem(oldKey);
+        if (oldSaved) {
+          const parsedOld = JSON.parse(oldSaved);
+          if (Array.isArray(parsedOld)) {
+            const recovered = parsedOld
+              .filter((item) => !isSampleInspectionRecord(item))
+              .map(enrichLegacyRecord);
+            if (recovered.length > 0) {
+              return recovered;
+            }
+          }
         }
       }
     } catch {
       // ignore
     }
-    return getInitialSampleInspections();
+    return [];
   });
 
   // 2. State: Cloud Sync Configuration with default Google Apps Script Web App URL
@@ -208,11 +243,28 @@ export default function App() {
   const [rememberDeviceAuth, setRememberDeviceAuth] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // GitHub 'ksf' Repo & GitHub Pages Yayınlama State
-  const [isPublishModalOpen, setIsPublishModalOpen] = useState<boolean>(false);
-  const [publishToken, setPublishToken] = useState<string>(
-    () => cloudConfig.githubToken || ""
-  );
+  // GitHub 'ksf' Repo & GitHub Pages Yayınlama State (Önizleme ortamında doğrudan açık başlar, GitHub Pages'te kapalı başlar)
+  const [isPublishModalOpen, setIsPublishModalOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    if (
+      window.location.protocol === "file:" ||
+      window.location.hostname.endsWith("github.io")
+    ) {
+      return false;
+    }
+    return true;
+  });
+  const [publishToken, setPublishToken] = useState<string>(() => {
+    try {
+      return (
+        cloudConfig.githubToken ||
+        localStorage.getItem("fatsa_adliyesi_github_token_v1") ||
+        ""
+      );
+    } catch {
+      return cloudConfig.githubToken || "";
+    }
+  });
   const [publishRepoName, setPublishRepoName] = useState<string>("ksf");
   const [isPublishingKsf, setIsPublishingKsf] = useState<boolean>(false);
   const [publishProgress, setPublishProgress] = useState<string | null>(null);
@@ -302,7 +354,7 @@ export default function App() {
     return d.toISOString().split("T")[0];
   }, []);
 
-  const [esasNo, setEsasNo] = useState("2026/365 E.");
+  const [esasNo, setEsasNo] = useState("");
   const [formDistrict, setFormDistrict] = useState<CourtDistrict>("Fatsa");
   const [neighborhoodInput, setNeighborhoodInput] = useState("Saraytepe Mahallesi");
   const [selectedTkgmMahalleId, setSelectedTkgmMahalleId] = useState<number | undefined>(
@@ -314,15 +366,13 @@ export default function App() {
   const [selectedLng, setSelectedLng] = useState<number>(37.54728);
   const [selectedCorridor, setSelectedCorridor] = useState<string>("Ilıca - İslamdağ Vadisi");
 
-  // Ada / Parsel & TKGM Kadastro Taşınmaz Sınır State (Gerçek Saraytepe 101 Ada 1 Parsel TKGM Verisi ile başlar)
-  const [adaNo, setAdaNo] = useState<string>("101");
-  const [parselNo, setParselNo] = useState<string>("1");
-  const [nitelik, setNitelik] = useState<string>("Fındık Bahçesi ve Tarla");
-  const [yuzolcumuInput, setYuzolcumuInput] = useState<string>("2746.15");
-  const [paftaNo, setPaftaNo] = useState<string>("G38-B-04-B-2-B");
-  const [parcelPolygon, setParcelPolygon] = useState<[number, number][]>(
-    INITIAL_SARAYTEPE_101_1_POLYGON
-  );
+  // Ada / Parsel & TKGM Kadastro Taşınmaz Sınır State (Örnek veri olmadan temiz başlar)
+  const [adaNo, setAdaNo] = useState<string>("");
+  const [parselNo, setParselNo] = useState<string>("");
+  const [nitelik, setNitelik] = useState<string>("");
+  const [yuzolcumuInput, setYuzolcumuInput] = useState<string>("");
+  const [paftaNo, setPaftaNo] = useState<string>("");
+  const [parcelPolygon, setParcelPolygon] = useState<[number, number][]>([]);
   const [parcelSource, setParcelSource] =
     useState<ParcelBoundarySource>("tkgm_api");
   const [tkgmStatusMessage, setTkgmStatusMessage] = useState<string | null>(null);
@@ -331,7 +381,7 @@ export default function App() {
   const [showQuickParcelMap, setShowQuickParcelMap] = useState<boolean>(false);
   const geoJsonFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [addressDetail, setAddressDetail] = useState("Saraytepe Köy İçi Mevkii");
+  const [addressDetail, setAddressDetail] = useState("");
   const [date, setDate] = useState<string>(defaultNextDate);
   // Varsayılan keşif saati 13:00 (kullanıcı dilerse değiştirebilir)
   const [time, setTime] = useState<string>("13:00");
@@ -342,25 +392,8 @@ export default function App() {
   const [subjectType, setSubjectType] =
     useState<InspectionSubjectType>("tasinmaz");
 
-  // Çoklu Parsel Listesi & Yakın Parsel Önerileri State
-  const [formParcels, setFormParcels] = useState<ParcelItem[]>([
-    {
-      id: "saraytepe-101-1",
-      mahalleId: 155062,
-      neighborhood: "Saraytepe Mahallesi",
-      adaNo: "101",
-      parselNo: "1",
-      nitelik: "Fındık Bahçesi ve Tarla",
-      yuzolcumuM2: 2746.15,
-      paftaNo: "G38-B-04-B-2-B",
-      mevkii: "Saraytepe Köy İçi Mevkii",
-      centerLat: 40.98521,
-      centerLng: 37.54728,
-      polygon: INITIAL_SARAYTEPE_101_1_POLYGON,
-      source: "tkgm_api",
-      distanceFromFirstMeters: 0,
-    },
-  ]);
+  // Çoklu Parsel Listesi & Yakın Parsel Önerileri State (Boş başlar, eklenen parseller asla birbirini ezmez)
+  const [formParcels, setFormParcels] = useState<ParcelItem[]>([]);
   const [nearbyParcelSuggestions, setNearbyParcelSuggestions] = useState<
     ParcelItem[]
   >([]);
@@ -611,7 +644,8 @@ export default function App() {
 
     const cleanAda = adaNo.trim();
     const cleanParsel = parselNo.trim();
-    if (!cleanAda && !cleanParsel) {
+    // Parsel numarası girilmeden TKGM sorgusu başlatma (Ada tek başına veya boşken sahte '1' parsel çekilmesini engeller)
+    if (!cleanParsel) {
       setParcelPolygon([]);
       setTkgmStatusMessage(null);
       return;
@@ -672,23 +706,23 @@ export default function App() {
             distanceFromFirstMeters: 0,
           };
 
-          // 1. parsel değiştiğinde veya boşsa ilk parsel olarak senkronize et
+          // ÖNEMLİ: 2. veya 3. parsel yazılırken daha önce eklenmiş olan 1. parseli ASLA silme veya üzerine yazma!
+          // Sadece eğer bu ada/parsel zaten formParcels listesinde varsa onun TKGM poligon/alan bilgisini güncelle.
           setFormParcels((prev) => {
-            if (prev.length === 0) return [primaryItem];
             const alreadyExists = prev.some(
-              (p) => p.adaNo === primaryItem.adaNo && p.parselNo === primaryItem.parselNo
+              (p) =>
+                (p.mahalleId || resolvedMahId) === resolvedMahId &&
+                p.adaNo === primaryItem.adaNo &&
+                p.parselNo === primaryItem.parselNo
             );
-            if (alreadyExists) {
-              return prev.map((p) =>
-                p.adaNo === primaryItem.adaNo && p.parselNo === primaryItem.parselNo
-                  ? primaryItem
-                  : p
-              );
-            }
-            if (prev.length === 1) {
-              return [primaryItem];
-            }
-            return prev;
+            if (!alreadyExists) return prev;
+            return prev.map((p) =>
+              (p.mahalleId || resolvedMahId) === resolvedMahId &&
+              p.adaNo === primaryItem.adaNo &&
+              p.parselNo === primaryItem.parselNo
+                ? primaryItem
+                : p
+            );
           });
 
           setTkgmStatusMessage(
@@ -697,7 +731,7 @@ export default function App() {
           );
           setFocusParcelZoomTrigger((c) => c + 1);
 
-          // 1. PARSEL GİRİLDİĞİNDE YAKINDAKİ KOMŞU PARSELLERİ OTOMATİK ÖNER
+          // PARSEL GİRİLDİĞİNDE YAKINDAKİ KOMŞU PARSELLERİ OTOMATİK ÖNER
           if (resolvedMahId) {
             setIsLoadingNearbyParcels(true);
             fetchNearbyTkgmParcels({
@@ -745,35 +779,20 @@ export default function App() {
     parcelSource,
   ]);
 
-  // Önerilen veya sorgulanan bir parseli tek tıkla dosyaya (formParcels listesine) ekler
-  const handleAddParcelItemToList = useCallback((item: ParcelItem) => {
-    setFormParcels((prev) => {
-      const exists = prev.some(
-        (p) => p.adaNo === item.adaNo && p.parselNo === item.parselNo
-      );
-      if (exists) return prev;
-      return [...prev, item];
-    });
-    setFocusParcelZoomTrigger((c) => c + 1);
-    setFormBannerMessage(
-      `✓ ${item.adaNo} Ada / ${item.parselNo} Parsel (${formatAreaM2(
-        item.yuzolcumuM2 || 0
-      )} m²) sınırlarıyla birlikte keşif dosyasına eklendi.`
-    );
-    setTimeout(() => setFormBannerMessage(null), 3500);
-  }, []);
-
-  // Mevcut input'taki parseli çoklu parsel listesine ekle
-  const handleAddCurrentInputParcelToList = () => {
-    const cleanAda = adaNo.trim() || "0";
-    const cleanParsel = parselNo.trim() || "1";
+  // Mevcut input'taki parseli ParcelItem nesnesine dönüştürür (Sadece Parsel No girilmişse oluşturur)
+  const buildCurrentInputParcelItem = useCallback((): ParcelItem | null => {
+    const cleanAda = adaNo.trim();
+    const cleanParsel = parselNo.trim();
+    if (!cleanParsel) return null;
+    const finalAda = cleanAda || "0";
+    const finalParsel = cleanParsel;
     const areaVal = Number(String(yuzolcumuInput).replace(",", ".")) || 0;
-    const item: ParcelItem = {
-      id: `${selectedTkgmMahalleId || formDistrict}-${cleanAda}-${cleanParsel}`,
+    return {
+      id: `${selectedTkgmMahalleId || formDistrict}-${finalAda}-${finalParsel}`,
       mahalleId: selectedTkgmMahalleId,
       neighborhood: neighborhoodInput,
-      adaNo: cleanAda,
-      parselNo: cleanParsel,
+      adaNo: finalAda,
+      parselNo: finalParsel,
       nitelik: nitelik.trim() || undefined,
       yuzolcumuM2: areaVal > 0 ? areaVal : undefined,
       paftaNo: paftaNo.trim() || undefined,
@@ -784,17 +803,184 @@ export default function App() {
         parcelPolygon && parcelPolygon.length >= 3 ? parcelPolygon : undefined,
       source: parcelSource,
     };
-    handleAddParcelItemToList(item);
+  }, [
+    adaNo,
+    parselNo,
+    yuzolcumuInput,
+    selectedTkgmMahalleId,
+    formDistrict,
+    neighborhoodInput,
+    nitelik,
+    paftaNo,
+    addressDetail,
+    selectedLat,
+    selectedLng,
+    parcelPolygon,
+    parcelSource,
+  ]);
+
+  // Haritada hem eklenmiş tüm parselleri hem de şu an kutuda yazılan parseli birlikte göstermek için birleştirilmiş liste
+  const combinedPreviewParcels = useMemo<ParcelItem[]>(() => {
+    const list = [...formParcels];
+    const currentItem = buildCurrentInputParcelItem();
+    if (currentItem) {
+      const exists = list.some(
+        (p) =>
+          (p.neighborhood || "") === (currentItem.neighborhood || "") &&
+          p.adaNo === currentItem.adaNo &&
+          p.parselNo === currentItem.parselNo
+      );
+      if (!exists) {
+        list.push(currentItem);
+      }
+    }
+    return list;
+  }, [formParcels, buildCurrentInputParcelItem]);
+
+  // Önerilen bir komşu parsele tıklandığında: eğer 1. parsel kutuda yazılıysa ve henüz listeye eklenmemişse önce 1. parseli korur, ardından tıklanan parseli ekler!
+  const handleAddParcelItemToList = useCallback(
+    (item: ParcelItem) => {
+      setFormParcels((prev) => {
+        const next = [...prev];
+        const currentInputItem = buildCurrentInputParcelItem();
+        if (currentInputItem) {
+          const currentExists = next.some(
+            (p) =>
+              (p.neighborhood || "") === (currentInputItem.neighborhood || "") &&
+              p.adaNo === currentInputItem.adaNo &&
+              p.parselNo === currentInputItem.parselNo
+          );
+          if (!currentExists) {
+            next.push(currentInputItem);
+          }
+        }
+        const itemExists = next.some(
+          (p) =>
+            (p.neighborhood || "") === (item.neighborhood || "") &&
+            p.adaNo === item.adaNo &&
+            p.parselNo === item.parselNo
+        );
+        if (!itemExists) {
+          next.push(item);
+        }
+        return next;
+      });
+      setFocusParcelZoomTrigger((c) => c + 1);
+      setFormBannerMessage(
+        `✓ ${item.adaNo} Ada / ${item.parselNo} Parsel (${formatAreaM2(
+          item.yuzolcumuM2 || 0
+        )} m²) önceki parseller korunarak dosyaya eklendi.`
+      );
+      setTimeout(() => setFormBannerMessage(null), 3500);
+    },
+    [buildCurrentInputParcelItem]
+  );
+
+  // Mevcut input'taki parseli çoklu parsel listesine ekle (Önceki eklenen parselleri korur ve yeni parsel girişi için Parsel No kutusunu hazırlar)
+  const handleAddCurrentInputParcelToList = () => {
+    const item = buildCurrentInputParcelItem();
+    if (!item) {
+      setFormBannerMessage("Lütfen önce eklenecek Parsel numarasını (ve varsa Ada numarasını) yazınız.");
+      setTimeout(() => setFormBannerMessage(null), 3000);
+      return;
+    }
+
+    setFormParcels((prev) => {
+      const existsIndex = prev.findIndex(
+        (p) =>
+          (p.neighborhood || "") === (item.neighborhood || "") &&
+          p.adaNo === item.adaNo &&
+          p.parselNo === item.parselNo
+      );
+      if (existsIndex >= 0) {
+        const updated = [...prev];
+        updated[existsIndex] = item;
+        return updated;
+      }
+      return [...prev, item];
+    });
+
+    // 1. parsel eklendikten sonra 2. parseli yazarken üzerine yazmaması için parselNo ve detay kutularını temizle (Ada No aynı kalır, kullanıcı hemen 2. parsel numarasını yazabilir)
+    setParselNo("");
+    setYuzolcumuInput("");
+    setPaftaNo("");
+    setParcelPolygon([]);
+    setTkgmStatusMessage(null);
+    setFocusParcelZoomTrigger((c) => c + 1);
+    setFormBannerMessage(
+      `✓ ${item.adaNo} Ada / ${item.parselNo} Parsel dosyaya eklendi. Şimdi 2. (veya sonraki) parsel numarasını yazıp tekrar 'Parseli Dosyaya Ekle' butonuna basabilirsiniz.`
+    );
+    setTimeout(() => setFormBannerMessage(null), 4000);
   };
 
+  // Yeni Keşif Ekle menüsüne basıldığında parsel bilgilerini sıfırlayarak (boş) açan yardımcı fonksiyon
+  const handleOpenNewInspectionTab = useCallback(
+    (options?: {
+      keepParcel?: boolean;
+      customDate?: string;
+      customLocation?: {
+        district: CourtDistrict;
+        neighborhood: string;
+        lat: number;
+        lng: number;
+      };
+    }) => {
+      if (!options?.keepParcel) {
+        setAdaNo("");
+        setParselNo("");
+        setYuzolcumuInput("");
+        setPaftaNo("");
+        setNitelik("");
+        setAddressDetail("");
+        setParcelPolygon([]);
+        setFormParcels([]);
+        setBatchParselInput("");
+        setNearbyParcelSuggestions([]);
+        setTkgmStatusMessage(null);
+        setParcelSource("cadastre_computed");
+      }
+      if (options?.customDate) {
+        setDate(options.customDate);
+      }
+      if (options?.customLocation) {
+        setFormDistrict(options.customLocation.district);
+        setNeighborhoodInput(options.customLocation.neighborhood);
+        setSelectedTkgmMahalleId(
+          resolveTkgmMahalle(
+            options.customLocation.district,
+            options.customLocation.neighborhood
+          )?.id
+        );
+        setBaseNeighborhoodLat(options.customLocation.lat);
+        setBaseNeighborhoodLng(options.customLocation.lng);
+        setSelectedLat(options.customLocation.lat);
+        setSelectedLng(options.customLocation.lng);
+      }
+      setShowQuickParcelMap(false);
+      setActiveTab("yeni_kesif");
+    },
+    []
+  );
+
   // Çoklu parsel listesinden parsel sil
-  const handleRemoveParcelFromList = (ada: string, parsel: string) => {
+  const handleRemoveParcelFromList = (
+    ada: string,
+    parsel: string,
+    neigh?: string
+  ) => {
     setFormParcels((prev) =>
-      prev.filter((p) => !(p.adaNo === ada && p.parselNo === parsel))
+      prev.filter(
+        (p) =>
+          !(
+            p.adaNo === ada &&
+            p.parselNo === parsel &&
+            (!neigh || (p.neighborhood || "") === neigh)
+          )
+      )
     );
   };
 
-  // Toplu parsel numarası girişi (Örn: "2, 3, 5, 8") -> TKGM'den çekip çoklu parsel listesine ekler
+  // Toplu parsel numarası girişi (Örn: "2, 3, 5, 8") -> Önceki parselleri koruyarak TKGM'den çekip çoklu parsel listesine ekler
   const handleBatchAddParcelsByNumbers = async () => {
     const rawNums = batchParselInput
       .split(/[,;\s-]+/)
@@ -806,10 +992,16 @@ export default function App() {
     const targetAda = adaNo.trim() || "0";
     const addedItems: ParcelItem[] = [];
 
+    // Eğer kutuda yazılı 1. parsel henüz formParcels'te yoksa önce onu da koru
+    const currentInputItem = buildCurrentInputParcelItem();
+
     try {
       for (const pNum of rawNums.slice(0, 20)) {
         const alreadyInList = formParcels.some(
-          (p) => p.adaNo === targetAda && p.parselNo === pNum
+          (p) =>
+            (p.neighborhood || "") === neighborhoodInput &&
+            p.adaNo === targetAda &&
+            p.parselNo === pNum
         );
         if (alreadyInList) continue;
 
@@ -841,13 +1033,28 @@ export default function App() {
         });
       }
 
-      if (addedItems.length > 0) {
+      if (addedItems.length > 0 || currentInputItem) {
         setFormParcels((prev) => {
           const next = [...prev];
+          if (
+            currentInputItem &&
+            !next.some(
+              (p) =>
+                (p.neighborhood || "") ===
+                  (currentInputItem.neighborhood || "") &&
+                p.adaNo === currentInputItem.adaNo &&
+                p.parselNo === currentInputItem.parselNo
+            )
+          ) {
+            next.push(currentInputItem);
+          }
           for (const item of addedItems) {
             if (
               !next.some(
-                (p) => p.adaNo === item.adaNo && p.parselNo === item.parselNo
+                (p) =>
+                  (p.neighborhood || "") === (item.neighborhood || "") &&
+                  p.adaNo === item.adaNo &&
+                  p.parselNo === item.parselNo
               )
             ) {
               next.push(item);
@@ -860,7 +1067,7 @@ export default function App() {
         setFormBannerMessage(
           `✓ ${addedItems.length} adet parsel (${addedItems
             .map((i) => `${i.adaNo}/${i.parselNo}`)
-            .join(", ")}) TKGM'den çekilerek dosyaya eklendi.`
+            .join(", ")}) önceki parseller korunarak dosyaya eklendi.`
         );
         setTimeout(() => setFormBannerMessage(null), 4500);
       }
@@ -1016,12 +1223,15 @@ export default function App() {
 
   // Query TKGM Cadastral Boundary and zoom directly into the parcel on the map
   const handleQueryAndShowParcelOnMap = async (openInlinePreview = false) => {
-    const targetAda = adaNo.trim() || "0";
-    const targetParsel = parselNo.trim() || "1";
-    if (!adaNo.trim() && !parselNo.trim()) {
-      setAdaNo(targetAda);
-      setParselNo(targetParsel);
+    const cleanParsel = parselNo.trim();
+    if (!cleanParsel) {
+      setTkgmStatusMessage(
+        "Lütfen TKGM'den sınır sorgulamak için Parsel numarasını (ve varsa Ada numarasını) giriniz."
+      );
+      return;
     }
+    const targetAda = adaNo.trim() || "0";
+    const targetParsel = cleanParsel;
     setIsQueryingParcel(true);
     setFocusedInspectionId(null);
     if (openInlinePreview && activeTab !== "yeni_kesif" && activeTab !== "harita") {
@@ -1284,16 +1494,19 @@ export default function App() {
       const finalPolygon =
         parcelPolygon && parcelPolygon.length >= 3 ? parcelPolygon : undefined;
 
-      // Ensure the active input parcel is also included if formParcels was empty
-      let finalParcelsList: ParcelItem[] = [...formParcels];
+      // Ensure both previously added formParcels AND the active input parcel (if any) are preserved in order (1st, 2nd, 3rd...)
+      const finalParcelsList: ParcelItem[] = [...formParcels];
       if (cleanAda || cleanParsel) {
         const currentKeyAda = cleanAda || "0";
         const currentKeyParsel = cleanParsel || "1";
         const hasCurrent = finalParcelsList.some(
-          (p) => p.adaNo === currentKeyAda && p.parselNo === currentKeyParsel
+          (p) =>
+            (p.neighborhood || "") === neighborhoodInput.trim() &&
+            p.adaNo === currentKeyAda &&
+            p.parselNo === currentKeyParsel
         );
         if (!hasCurrent) {
-          finalParcelsList.unshift({
+          finalParcelsList.push({
             id: `${selectedTkgmMahalleId || formDistrict}-${currentKeyAda}-${currentKeyParsel}`,
             mahalleId: selectedTkgmMahalleId,
             neighborhood: neighborhoodInput.trim(),
@@ -1334,8 +1547,8 @@ export default function App() {
         parcelSource,
         parcels: finalParcelsList.length > 0 ? finalParcelsList : undefined,
         addressDetail: addressDetail.trim() || undefined,
-        lat: selectedLat,
-        lng: selectedLng,
+        lat: primaryParcel?.centerLat || selectedLat,
+        lng: primaryParcel?.centerLng || selectedLng,
         date,
         time,
         caseType,
@@ -1360,11 +1573,17 @@ export default function App() {
     const match = esasNo.match(/(\d{4})\/(\d+)/);
     if (match) {
       setEsasNo(`${match[1]}/${Number(match[2]) + 1} E.`);
+    } else {
+      setEsasNo("");
     }
-    if (subjectType === "tasinmaz" && parselNo && !isNaN(Number(parselNo))) {
-      setParselNo(String(Number(parselNo) + 1));
-      setFormParcels([]);
-    }
+    setAdaNo("");
+    setParselNo("");
+    setYuzolcumuInput("");
+    setPaftaNo("");
+    setNitelik("");
+    setParcelPolygon([]);
+    setFormParcels([]);
+    setNearbyParcelSuggestions([]);
     setVehiclePlateNo("");
     setVehicleBrandModel("");
     setVehicleDamageSummary("");
@@ -1806,6 +2025,7 @@ export default function App() {
 
       try {
         localStorage.setItem(STORAGE_KEY_PUBLISHED_KSF, JSON.stringify(result));
+        localStorage.setItem("fatsa_adliyesi_github_token_v1", tokenToUse);
       } catch {
         // ignore
       }
@@ -1819,10 +2039,18 @@ export default function App() {
     }
   };
 
-  // Kullanıcının daha önce kaydettiği GitHub Token varsa 'ksf' (TaunMilitary/ksf) reposundaki
-  // GitHub Actions (npm install exit code 1 & Node 20 uyarısı) ve index.html (/src/main.tsx 404) hatalarını otomatik onar
+  // Kullanıcının daha önce kaydettiği GitHub Token varsa 'ksf' (TaunMilitary/ksf) reposuna son güncellemeleri otomatik yayınla
   useEffect(() => {
-    const savedToken = (cloudConfig.githubToken || publishToken || "").trim();
+    let savedToken = (cloudConfig.githubToken || publishToken || "").trim();
+    if (!savedToken) {
+      try {
+        savedToken = (
+          localStorage.getItem("fatsa_adliyesi_github_token_v1") || ""
+        ).trim();
+      } catch {
+        // ignore
+      }
+    }
     if (!savedToken) return;
     if (
       typeof window !== "undefined" &&
@@ -1832,40 +2060,243 @@ export default function App() {
       return;
     }
     try {
-      if (localStorage.getItem("fatsa_ksf_autofix_v3") === "done") return;
+      if (localStorage.getItem("fatsa_ksf_autopublish_v7") === "done") return;
     } catch {
       return;
     }
 
     let cancelled = false;
+    setIsPublishingKsf(true);
+    setPublishError(null);
+    setPublishProgress("GitHub hesabınıza bağlanılıyor ve dosyalar yayınlanıyor...");
+
     (async () => {
       try {
         const res = await publishProjectToGitHubPagesKsf(
           savedToken,
-          publishRepoName || "ksf"
+          publishRepoName || "ksf",
+          (stepMsg) => {
+            if (!cancelled) setPublishProgress(stepMsg);
+          }
         );
         if (!cancelled) {
           setPublishResult(res);
+          setPublishProgress(null);
           try {
-            localStorage.setItem("fatsa_ksf_autofix_v3", "done");
+            localStorage.setItem("fatsa_ksf_autopublish_v7", "done");
             localStorage.setItem(STORAGE_KEY_PUBLISHED_KSF, JSON.stringify(res));
           } catch {
             // ignore
           }
           setFormBannerMessage(
-            `✓ GitHub '${res.owner}/${res.repoName}' reposundaki Actions (npm install / Node 20) ve index.html hataları otomatik giderildi!`
+            `✓ Sistem güncellemesi GitHub '${res.owner}/${res.repoName}' (GitHub Pages) deponuza otomatik olarak yayınlandı!`
           );
-          setTimeout(() => setFormBannerMessage(null), 7000);
+          setTimeout(() => setFormBannerMessage(null), 8000);
         }
-      } catch {
-        // ignore silent auto-fix error
+      } catch (err: any) {
+        if (!cancelled) {
+          setPublishProgress(null);
+          setPublishError(
+            err?.message ||
+              "Otomatik yayınlama sırasında hata oluştu. Lütfen aşağıdaki butona tıklayarak yayınlayınız."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setIsPublishingKsf(false);
+        }
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [cloudConfig.githubToken]);
+  }, [cloudConfig.githubToken, publishToken, publishRepoName]);
+
+  const renderGitHubPublishModal = () => {
+    if (!isPublishModalOpen) return null;
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/65 p-3 sm:p-4 backdrop-blur-xs">
+        <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-900 shadow-2xl">
+          <div className="flex items-center justify-between border-b border-slate-200 bg-slate-900 px-5 py-4 text-white">
+            <div className="flex items-center gap-2.5">
+              <Globe className="h-5 w-5 text-indigo-400 shrink-0" />
+              <div>
+                <h2 className="text-sm sm:text-base font-bold">
+                  Projeyi GitHub &lsquo;ksf&rsquo; Reposunda Yayınla (GitHub Pages)
+                </h2>
+                <p className="text-[11px] text-slate-300">
+                  Tüm güncel proje dosyalarını GitHub hesabınızdaki &lsquo;ksf&rsquo; deposuna yükler ve GitHub Pages&rsquo;i günceller
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsPublishModalOpen(false)}
+              className="rounded-lg p-1 text-slate-300 hover:bg-slate-800 hover:text-white"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          <form onSubmit={handlePublishToKsfGitHubPages} className="p-5 space-y-4">
+            <div className="rounded-xl border border-indigo-200 bg-indigo-50/70 p-3.5 text-xs text-indigo-950 space-y-1.5">
+              <div className="font-bold flex items-center gap-1.5">
+                <GitBranch className="h-4 w-4 text-indigo-600 shrink-0" />
+                <span>GitHub &lsquo;ksf&rsquo; Repo Güncellemesi & Canlı Paket Aktarımı</span>
+              </div>
+              <p className="text-[11px] text-slate-700 leading-relaxed">
+                <strong>TaunMilitary/ksf</strong> deponuza aktarılacak son güncellemeler:
+              </p>
+              <ul className="list-disc pl-4 text-[11px] text-slate-700 space-y-0.5">
+                <li>
+                  <strong>Yeni Keşif Ekle & Çoklu Parsel Düzeltmesi:</strong> &ldquo;Yeni Keşif Ekle&rdquo; menüsüne basıldığında parsel bilgisi tamamen boş gelir; 2. ve 3. parsel eklendiğinde 1. parselin üzerine yazma sorunu giderilmiştir.
+                </li>
+                <li>
+                  <strong>Yapay Zeka Rota & Gün Tavsiyesi Menüsü:</strong> Birden fazla mahalle ve parsel için akıllı rota ve gün planlama sekmesi eklendi.
+                </li>
+                <li>
+                  <strong>Büyük Paket (Git Blobs API) Desteği:</strong> 1.4 MB boyutundaki derlenmiş <code className="font-mono">standalone-bundle.js</code> ve tüm kaynak dosyalar GitHub Git Data Blobs API ile eksiksiz yüklenir.
+                </li>
+              </ul>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-bold text-slate-800 mb-1">
+                  1. GitHub Personal Access Token (repo yetkili) *
+                </label>
+                <div className="relative">
+                  <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="password"
+                    autoFocus={!publishToken}
+                    value={publishToken}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setPublishToken(val);
+                      try {
+                        localStorage.setItem(
+                          "fatsa_adliyesi_github_token_v1",
+                          val.trim()
+                        );
+                      } catch {
+                        // ignore
+                      }
+                      if (publishError) setPublishError(null);
+                    }}
+                    placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                    className="w-full rounded-lg border border-slate-300 pl-8 pr-3 py-2 text-xs font-mono text-slate-900 focus:border-indigo-600 focus:outline-none"
+                  />
+                </div>
+                <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
+                  <span>Classic Token&rsquo;da &lsquo;repo&rsquo; kutucuğu işaretli olmalıdır.</span>
+                  <a
+                    href="https://github.com/settings/tokens/new?description=Fatsa-Kesif-ksf-Pages&scopes=repo,gist,workflow"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 font-semibold text-indigo-600 hover:underline"
+                  >
+                    <span>Token Oluştur</span>
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">
+                  2. Repo Adı *
+                </label>
+                <input
+                  type="text"
+                  value={publishRepoName}
+                  onChange={(e) => setPublishRepoName(e.target.value)}
+                  placeholder="ksf"
+                  className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-mono font-bold text-slate-900 focus:border-indigo-600 focus:bg-white focus:outline-none"
+                />
+                <div className="mt-1 text-[10px] text-slate-500">
+                  Varsayılan: <code className="font-mono font-bold">ksf</code>
+                </div>
+              </div>
+            </div>
+
+            {publishProgress && (
+              <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-3.5 py-2.5 text-xs font-semibold text-indigo-900 flex items-center gap-2">
+                <Sparkles className="h-4 w-4 animate-spin text-indigo-600 shrink-0" />
+                <span>{publishProgress}</span>
+              </div>
+            )}
+
+            {publishError && (
+              <div className="rounded-xl border border-rose-300 bg-rose-50 px-3.5 py-2.5 text-xs font-medium text-rose-900">
+                {publishError}
+              </div>
+            )}
+
+            {publishResult && (
+              <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-4 space-y-2 text-xs">
+                <div className="flex items-center gap-1.5 font-bold text-emerald-950 text-sm">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <span>
+                    Proje &lsquo;{publishResult.owner}/{publishResult.repoName}&rsquo; Reposuna Yayınlandı!
+                  </span>
+                </div>
+                <div className="space-y-1 text-slate-700">
+                  <div>
+                    🌐 <strong>Doğrudan Çalışan GitHub Pages Adresi:</strong>{" "}
+                    <a
+                      href={publishResult.pagesUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-mono font-bold text-indigo-700 underline hover:text-indigo-900 break-all"
+                    >
+                      {publishResult.pagesUrl}
+                    </a>
+                  </div>
+                  <div>
+                    📦 <strong>GitHub Kaynak Kodu Deposu:</strong>{" "}
+                    <a
+                      href={publishResult.repoUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-mono text-slate-900 underline break-all"
+                    >
+                      {publishResult.repoUrl}
+                    </a>
+                  </div>
+                  <div className="text-[11px] text-slate-600 pt-1">
+                    Not: GitHub Pages güncellemesinin canlı adrese yansıması 30-60 saniye sürebilir.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-3">
+              <button
+                type="button"
+                onClick={() => setIsPublishModalOpen(false)}
+                className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Kapat
+              </button>
+              <button
+                type="submit"
+                disabled={isPublishingKsf}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
+              >
+                <Globe className="h-4 w-4" />
+                <span>
+                  {isPublishingKsf
+                    ? "GitHub 'ksf' Reposuna Yayınlanıyor..."
+                    : "Şimdi 'ksf' Reposunda Yayınla & Güncelle"}
+                </span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  };
 
   // ============================================================================
   // AÇILIŞ GÜVENLİK ŞİFRE EKRANI ("Fatsa2.SHM52")
@@ -1905,7 +2336,7 @@ export default function App() {
                   <input
                     id="court-password-input"
                     type={showPassword ? "text" : "password"}
-                    autoFocus
+                    autoFocus={!isPublishModalOpen}
                     value={passwordInput}
                     onChange={(e) => {
                       setPasswordInput(e.target.value);
@@ -1953,6 +2384,15 @@ export default function App() {
                 <span>Sisteme Güvenli Giriş Yap</span>
               </button>
 
+              <button
+                type="button"
+                onClick={() => setIsPublishModalOpen(true)}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-indigo-400/50 bg-indigo-600/90 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-indigo-500"
+              >
+                <Globe className="h-3.5 w-3.5" />
+                <span>Dosyaları GitHub &lsquo;ksf&rsquo; Hesabımda Yayınla</span>
+              </button>
+
               <div className="border-t border-slate-700/80 pt-3 flex items-center justify-between text-[11px] text-slate-400">
                 <span>Yetkili Birim: Fatsa Sulh Hukuk Kalemi</span>
                 <span className="font-mono text-emerald-400">CBS v5.2</span>
@@ -1964,6 +2404,8 @@ export default function App() {
         <footer className="text-center text-xs text-slate-500 py-2">
           T.C. Fatsa Adliyesi (Fatsa · Çamaş · Çatalpınar) — Yetkisiz erişim güvenlik politikası gereği kısıtlanmıştır.
         </footer>
+
+        {renderGitHubPublishModal()}
       </div>
     );
   }
@@ -2027,7 +2469,7 @@ export default function App() {
             Genel Harita & Parseller
           </button>
           <button
-            onClick={() => setActiveTab("yeni_kesif")}
+            onClick={() => handleOpenNewInspectionTab()}
             className={`py-1 transition-colors whitespace-nowrap shrink-0 ${
               activeTab === "yeni_kesif"
                 ? "text-white underline decoration-emerald-400 decoration-2 underline-offset-8"
@@ -2035,6 +2477,17 @@ export default function App() {
             }`}
           >
             Yeni Keşif Ekle
+          </button>
+          <button
+            onClick={() => setActiveTab("ai_rota")}
+            className={`flex items-center gap-1.5 py-1 transition-colors whitespace-nowrap shrink-0 ${
+              activeTab === "ai_rota"
+                ? "text-emerald-300 font-bold underline decoration-emerald-400 decoration-2 underline-offset-8"
+                : "text-emerald-300/90 hover:text-white"
+            }`}
+          >
+            <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
+            <span>Yapay Zeka Rota & Gün Tavsiyesi</span>
           </button>
           <button
             onClick={() => setActiveTab("ayarlar")}
@@ -2103,6 +2556,7 @@ export default function App() {
       {/* ====================================================================
           COURTROOM QUICK QUERY BAR (Ana Ekran Hızlı İlçe, Mahalle/Köy ve Ada/Parsel Sorgulama)
          ==================================================================== */}
+      {activeTab !== "yeni_kesif" && (
       <section className="border-b border-slate-200 bg-white px-3.5 py-3 sm:px-6">
         <div className="mx-auto max-w-[1360px]">
           <div className="flex flex-col gap-2.5 xl:flex-row xl:items-center xl:justify-between">
@@ -2212,9 +2666,6 @@ export default function App() {
                   onChange={(e) => {
                     setParcelSource("cadastre_computed");
                     setAdaNo(e.target.value);
-                    if (activeTab !== "yeni_kesif" && activeTab !== "harita") {
-                      setShowQuickParcelMap(true);
-                    }
                   }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
@@ -2232,8 +2683,9 @@ export default function App() {
                   value={parselNo}
                   onChange={(e) => {
                     setParcelSource("cadastre_computed");
-                    setParselNo(e.target.value);
-                    if (activeTab !== "yeni_kesif" && activeTab !== "harita") {
+                    const val = e.target.value;
+                    setParselNo(val);
+                    if (val.trim() && activeTab !== "harita") {
                       setShowQuickParcelMap(true);
                     }
                   }}
@@ -2281,7 +2733,7 @@ export default function App() {
               </button>
 
               <button
-                onClick={() => setActiveTab("yeni_kesif")}
+                onClick={() => handleOpenNewInspectionTab()}
                 className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-slate-800 whitespace-nowrap"
               >
                 <Plus className="h-3.5 w-3.5 text-emerald-400" />
@@ -2292,13 +2744,12 @@ export default function App() {
 
           {/* INLINE PARCEL BOUNDARY MAP PREVIEW ON MAIN SCREEN (Opened automatically when typing Ada/Parsel or clicking "TKGM Sınırı Çiz") */}
           {showQuickParcelMap &&
-            activeTab !== "yeni_kesif" &&
             activeTab !== "harita" && (
               <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50/50 p-3 space-y-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-2 text-xs">
                     <span className="rounded bg-amber-600 px-2 py-0.5 font-mono text-[11px] font-bold text-white">
-                      📐 {adaNo || "0"} Ada / {parselNo || "1"} Parsel
+                      📐 {adaNo || "0"} Ada / {parselNo} Parsel
                     </span>
                     {parcelSource === "tkgm_api" && (
                       <span className="rounded bg-emerald-700 px-2 py-0.5 text-[11px] font-bold text-white">
@@ -2322,10 +2773,9 @@ export default function App() {
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => {
-                        setShowQuickParcelMap(false);
-                        setActiveTab("yeni_kesif");
-                      }}
+                      onClick={() =>
+                        handleOpenNewInspectionTab({ keepParcel: true })
+                      }
                       className="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-700 whitespace-nowrap"
                     >
                       + Bu Ada/Parsel İçin Keşif Planla &rarr;
@@ -2403,7 +2853,7 @@ export default function App() {
                 type="button"
                 onClick={() => {
                   handleApplySuggestionDate(smartSuggestions[0]);
-                  setActiveTab("yeni_kesif");
+                  handleOpenNewInspectionTab({ keepParcel: true });
                 }}
                 className="rounded bg-emerald-700 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-800 whitespace-nowrap shrink-0 self-start sm:self-auto"
               >
@@ -2413,6 +2863,7 @@ export default function App() {
           )}
         </div>
       </section>
+      )}
 
       {/* ====================================================================
           MAIN WORKSPACE CONTENT
@@ -2438,13 +2889,24 @@ export default function App() {
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-12 items-start">
             {/* Left Column: Form */}
             <div className="lg:col-span-6 rounded-xl border border-slate-200 bg-white p-4 sm:p-6">
-              <div className="border-b border-slate-200 pb-3">
-                <h1 className="text-base sm:text-lg font-bold text-slate-900">
-                  Yeni Keşif & Taşınmaz (Ada/Parsel) Planla
-                </h1>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Mahalle ve Ada/Parsel numarasını yazdığınızda TKGM MEGSİS üzerinden parsel sınırları otomatik çekilip haritada çizilir
-                </p>
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
+                <div>
+                  <h1 className="text-base sm:text-lg font-bold text-slate-900">
+                    Yeni Keşif & Taşınmaz (Ada/Parsel) Planla
+                  </h1>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Mahalle ve Ada/Parsel numarasını kendiniz girdiğinizde TKGM MEGSİS üzerinden parsel sınırları otomatik çekilip haritada çizilir
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleOpenNewInspectionTab()}
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+                  title="Parsel ve form alanlarını sıfırla"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  <span>Parsel Bilgilerini Temizle</span>
+                </button>
               </div>
 
               <form onSubmit={handleAddInspection} className="mt-4 space-y-3.5">
@@ -2944,7 +3406,13 @@ export default function App() {
                             setParcelSource("cadastre_computed");
                             setAdaNo(e.target.value);
                           }}
-                          placeholder="Örn: 101 veya 0"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              handleQueryAndShowParcelOnMap(false);
+                            }
+                          }}
+                          placeholder="Boş (Kendiniz girin)"
                           className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:border-amber-600 focus:outline-none"
                         />
                       </div>
@@ -2959,7 +3427,13 @@ export default function App() {
                             setParcelSource("cadastre_computed");
                             setParselNo(e.target.value);
                           }}
-                          placeholder="Örn: 1"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              handleQueryAndShowParcelOnMap(false);
+                            }
+                          }}
+                          placeholder="Boş (Kendiniz girin)"
                           className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:border-amber-600 focus:outline-none"
                         />
                       </div>
@@ -3051,7 +3525,9 @@ export default function App() {
                         >
                           <Plus className="h-3.5 w-3.5" />
                           <span>
-                            {adaNo || "0"}/{parselNo || "1"} Parseli Dosyaya Ekle
+                            {parselNo.trim()
+                              ? `${adaNo.trim() || "0"}/${parselNo.trim()} Parseli Dosyaya Ekle`
+                              : "Parseli Dosyaya Ekle"}
                           </span>
                         </button>
                       </div>
@@ -3142,12 +3618,20 @@ export default function App() {
                       {/* Çoklu Parsel Toplu Numara Ekleme (Örn: 2, 3, 5, 8) */}
                       <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-100">
                         <span className="text-[11px] font-semibold text-slate-700">
-                          {adaNo || "0"} Adadaki Çoklu Parselleri Toplu Ekle:
+                          {adaNo.trim()
+                            ? `${adaNo.trim()} Adadaki Çoklu Parselleri Toplu Ekle:`
+                            : "Aynı Adadaki Çoklu Parselleri Toplu Ekle:"}
                         </span>
                         <input
                           type="text"
                           value={batchParselInput}
                           onChange={(e) => setBatchParselInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              handleBatchAddParcelsByNumbers();
+                            }
+                          }}
                           placeholder="Örn: 2, 3, 4, 7, 12"
                           className="flex-1 min-w-[130px] rounded border border-slate-300 bg-slate-50 px-2 py-1 text-xs font-mono text-slate-900 focus:border-emerald-600 focus:bg-white focus:outline-none"
                         />
@@ -3226,21 +3710,20 @@ export default function App() {
                                   ({formatAreaM2(p.yuzolcumuM2)} m²)
                                 </span>
                               )}
-                              {formParcels.length > 1 && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleRemoveParcelFromList(
-                                      p.adaNo,
-                                      p.parselNo
-                                    )
-                                  }
-                                  className="ml-0.5 text-slate-400 hover:text-red-600"
-                                  title="Bu parseli dosyadan çıkar"
-                                >
-                                  <X className="h-3.5 w-3.5" />
-                                </button>
-                              )}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleRemoveParcelFromList(
+                                    p.adaNo,
+                                    p.parselNo,
+                                    p.neighborhood
+                                  )
+                                }
+                                className="ml-0.5 text-slate-400 hover:text-red-600"
+                                title="Bu parseli dosyadan çıkar"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
                             </div>
                           ))}
                         </div>
@@ -3587,14 +4070,16 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  (adaNo || parselNo || formParcels.length > 0) && (
+                  (parselNo.trim() || formParcels.length > 0) && (
                     <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="rounded bg-amber-600 px-2 py-0.5 font-mono text-[11px] font-bold text-white">
                           📐{" "}
                           {formParcels.length > 1
                             ? `${formParcels.length} Parsel Seçili`
-                            : `${adaNo || "0"} Ada / ${parselNo || "1"} Parsel`}
+                            : formParcels.length === 1 && !parselNo.trim()
+                            ? `${formParcels[0].adaNo} Ada / ${formParcels[0].parselNo} Parsel`
+                            : `${adaNo.trim() || "0"} Ada / ${parselNo.trim()} Parsel`}
                         </span>
                         {nitelik && (
                           <span className="font-semibold text-amber-950">
@@ -3642,7 +4127,9 @@ export default function App() {
                       : undefined
                   }
                   selectedParcels={
-                    subjectType === "tasinmaz" ? formParcels : undefined
+                    subjectType === "tasinmaz"
+                      ? combinedPreviewParcels
+                      : undefined
                   }
                   focusParcelZoomTrigger={focusParcelZoomTrigger}
                   pickerRouteGeometry={pickerGeometry}
@@ -3710,15 +4197,14 @@ export default function App() {
                     <span>PDF Çıktısı</span>
                   </button>
                   <button
-                    onClick={handleResetSampleData}
-                    className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 whitespace-nowrap"
-                    title="Örnek Fatsa, Çamaş ve Çatalpınar keşif verilerini geri yükle"
+                    onClick={() => setActiveTab("ai_rota")}
+                    className="flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs font-bold text-emerald-900 hover:bg-emerald-100 whitespace-nowrap"
                   >
-                    <RotateCcw className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">Örnek Veri</span>
+                    <Sparkles className="h-3.5 w-3.5 text-emerald-600" />
+                    <span>YZ Rota & Gün Tavsiyesi</span>
                   </button>
                   <button
-                    onClick={() => setActiveTab("yeni_kesif")}
+                    onClick={() => handleOpenNewInspectionTab()}
                     className="flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 whitespace-nowrap"
                   >
                     <Plus className="h-3.5 w-3.5" />
@@ -4060,16 +4546,17 @@ export default function App() {
 
                                 <div className="flex items-center gap-1.5">
                                   <button
-                                    onClick={() => {
-                                      setFormDistrict(rec.district);
-                                      setNeighborhoodInput(rec.neighborhood);
-                                      setBaseNeighborhoodLat(rec.lat);
-                                      setBaseNeighborhoodLng(rec.lng);
-                                      setSelectedLat(rec.lat);
-                                      setSelectedLng(rec.lng);
-                                      setDate(rec.date);
-                                      setActiveTab("yeni_kesif");
-                                    }}
+                                    onClick={() =>
+                                      handleOpenNewInspectionTab({
+                                        customDate: rec.date,
+                                        customLocation: {
+                                          district: rec.district,
+                                          neighborhood: rec.neighborhood,
+                                          lat: rec.lat,
+                                          lng: rec.lng,
+                                        },
+                                      })
+                                    }
                                     className="rounded border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:border-emerald-500 hover:text-emerald-700 whitespace-nowrap"
                                   >
                                     + Yanına Ekle
@@ -4102,10 +4589,7 @@ export default function App() {
             weatherMap={weatherMap}
             selectedDate={selectedCalendarDate}
             onSelectDate={(d) => setSelectedCalendarDate(d)}
-            onAddForDate={(d) => {
-              setDate(d);
-              setActiveTab("yeni_kesif");
-            }}
+            onAddForDate={(d) => handleOpenNewInspectionTab({ customDate: d })}
             onOpenOnMap={(d) => {
               setMapFilterDate(d);
               setFocusedInspectionId(null);
@@ -4277,6 +4761,25 @@ export default function App() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* VIEW 4.5: YAPAY ZEKA ÇOKLU MAHALLE & PARSEL ROTA VE GÜN TAVSİYESİ */}
+        {activeTab === "ai_rota" && (
+          <MultiRouteAdvisorView
+            existingInspections={inspections}
+            defaultExpertsText={combinedExpertsText}
+            createdByLabel={
+              createdByInput.trim() ||
+              formatUserProfileCreator(userProfile, autoDetectedDeviceLabel)
+            }
+            deviceType={detectedDeviceType}
+            onAddRecordsBatch={(newBatch) => {
+              const updated = [...inspections, ...newBatch];
+              setInspections(updated);
+              pushRecordsToCloudIfEnabled(updated);
+            }}
+            onSwitchToAgenda={() => setActiveTab("ajanda")}
+          />
         )}
 
         {/* VIEW 5: AYARLAR (KULLANICI ADI, UNVAN SEÇİMİ VE BULUT SENKRONİZASYON) */}
@@ -4599,13 +5102,22 @@ export default function App() {
           <span>Harita</span>
         </button>
         <button
-          onClick={() => setActiveTab("yeni_kesif")}
+          onClick={() => handleOpenNewInspectionTab()}
           className={`flex flex-col items-center gap-0.5 text-[10px] font-semibold ${
             activeTab === "yeni_kesif" ? "text-emerald-700" : "text-slate-500"
           }`}
         >
           <Plus className="h-4 w-4" />
           <span>+ Keşif</span>
+        </button>
+        <button
+          onClick={() => setActiveTab("ai_rota")}
+          className={`flex flex-col items-center gap-0.5 text-[10px] font-semibold ${
+            activeTab === "ai_rota" ? "text-emerald-700" : "text-slate-500"
+          }`}
+        >
+          <Sparkles className="h-4 w-4" />
+          <span>YZ Rota</span>
         </button>
         <button
           onClick={() => setActiveTab("ayarlar")}
@@ -4966,184 +5478,29 @@ export default function App() {
         onSaveConfig={handleSaveCloudConfig}
         records={inspections}
         onReplaceRecords={(newRecords) => {
-          setInspections(newRecords.map(enrichLegacyRecord));
+          // Buluttan çekilen kayıtlarda örnek verileri temizle ve kullanıcının yerel kayıtlarını koruyarak birleştir
+          const incomingClean = newRecords
+            .filter((r) => !isSampleInspectionRecord(r))
+            .map(enrichLegacyRecord);
+          setInspections((prev) => {
+            const map = new Map<string, InspectionRecord>();
+            for (const item of prev) {
+              if (!isSampleInspectionRecord(item)) {
+                map.set(item.id, item);
+              }
+            }
+            for (const inc of incomingClean) {
+              map.set(inc.id, inc);
+            }
+            return Array.from(map.values());
+          });
         }}
       />
 
       {/* ====================================================================
           GITHUB 'ksf' REPOSITORY & GITHUB PAGES YAYINLAMA MODALI
          ==================================================================== */}
-      {isPublishModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/65 p-3 sm:p-4 backdrop-blur-xs">
-          <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-900 px-5 py-4 text-white">
-              <div className="flex items-center gap-2.5">
-                <Globe className="h-5 w-5 text-indigo-400 shrink-0" />
-                <div>
-                  <h2 className="text-sm sm:text-base font-bold">
-                    Projeyi GitHub &lsquo;ksf&rsquo; Reposunda Yayınla (GitHub Pages)
-                  </h2>
-                  <p className="text-[11px] text-slate-300">
-                    Tüm proje dosyalarını GitHub hesabınızdaki &lsquo;ksf&rsquo; deposuna yükler ve GitHub Pages&rsquo;i aktif eder
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsPublishModalOpen(false)}
-                className="rounded-lg p-1 text-slate-300 hover:bg-slate-800 hover:text-white"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handlePublishToKsfGitHubPages} className="p-5 space-y-4">
-              <div className="rounded-xl border border-indigo-200 bg-indigo-50/70 p-3.5 text-xs text-indigo-950 space-y-1.5">
-                <div className="font-bold flex items-center gap-1.5">
-                  <GitBranch className="h-4 w-4 text-indigo-600 shrink-0" />
-                  <span>GitHub &lsquo;ksf&rsquo; Repo Hata Tespiti & Otomatik Onarım</span>
-                </div>
-                <p className="text-[11px] text-slate-700 leading-relaxed">
-                  <strong>TaunMilitary/ksf</strong> deponuzda tespit edilen ve bu güncellemeyle giderilen hatalar:
-                </p>
-                <ul className="list-disc pl-4 text-[11px] text-slate-700 space-y-0.5">
-                  <li>
-                    <strong>GitHub Actions (Run #40657981178) &ldquo;Install dependencies&rdquo; Hatası:</strong> <code className="font-mono">npm install</code> adımındaki sandbox paket uyumsuzluğu (Exit Code 1) ve <code className="font-mono">Node.js 20 is deprecated</code> uyarıları giderildi (<code className="font-mono">Node 24</code> ve doğrudan statik paket doğrulama aktif edildi).
-                  </li>
-                  <li>
-                    <strong>GitHub Pages <code className="font-mono">/src/main.tsx</code> 404 Konsol Hatası:</strong> <code className="font-mono">index.html</code> içindeki ham TypeScript modül çağrısı kaldırılarak doğrudan <code className="font-mono">standalone-bundle.js</code> ve <code className="font-mono">standalone-bundle.css</code> yüklenecek şekilde düzeltildi.
-                  </li>
-                  <li>
-                    <strong>Gereksiz Kilit Dosyaları:</strong> Çakışma yaratan <code className="font-mono">bun.lock</code> ve <code className="font-mono">.env.example</code> dosyaları repo ağacından temizlendi.
-                  </li>
-                </ul>
-              </div>
-
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold text-slate-800 mb-1">
-                    1. GitHub Personal Access Token (repo yetkili) *
-                  </label>
-                  <div className="relative">
-                    <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-                    <input
-                      type="password"
-                      value={publishToken}
-                      onChange={(e) => {
-                        setPublishToken(e.target.value);
-                        if (publishError) setPublishError(null);
-                      }}
-                      placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-                      className="w-full rounded-lg border border-slate-300 pl-8 pr-3 py-2 text-xs font-mono text-slate-900 focus:border-indigo-600 focus:outline-none"
-                    />
-                  </div>
-                  <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
-                    <span>Classic Token&rsquo;da &lsquo;repo&rsquo; kutucuğu işaretli olmalıdır.</span>
-                    <a
-                      href="https://github.com/settings/tokens/new?description=Fatsa-Kesif-ksf-Pages&scopes=repo,gist,workflow"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 font-semibold text-indigo-600 hover:underline"
-                    >
-                      <span>Token Oluştur</span>
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-800 mb-1">
-                    2. Repo Adı *
-                  </label>
-                  <input
-                    type="text"
-                    value={publishRepoName}
-                    onChange={(e) => setPublishRepoName(e.target.value)}
-                    placeholder="ksf"
-                    className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-mono font-bold text-slate-900 focus:border-indigo-600 focus:bg-white focus:outline-none"
-                  />
-                  <div className="mt-1 text-[10px] text-slate-500">
-                    Varsayılan: <code className="font-mono font-bold">ksf</code>
-                  </div>
-                </div>
-              </div>
-
-              {publishProgress && (
-                <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-3.5 py-2.5 text-xs font-semibold text-indigo-900 flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 animate-spin text-indigo-600 shrink-0" />
-                  <span>{publishProgress}</span>
-                </div>
-              )}
-
-              {publishError && (
-                <div className="rounded-xl border border-rose-300 bg-rose-50 px-3.5 py-2.5 text-xs font-medium text-rose-900">
-                  {publishError}
-                </div>
-              )}
-
-              {publishResult && (
-                <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-4 space-y-2 text-xs">
-                  <div className="flex items-center gap-1.5 font-bold text-emerald-950 text-sm">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                    <span>
-                      Proje &lsquo;{publishResult.owner}/{publishResult.repoName}&rsquo; Reposuna Yayınlandı!
-                    </span>
-                  </div>
-                  <div className="space-y-1 text-slate-700">
-                    <div>
-                      🌐 <strong>Doğrudan Çalışan GitHub Pages Adresi:</strong>{" "}
-                      <a
-                        href={publishResult.pagesUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-mono font-bold text-indigo-700 underline hover:text-indigo-900 break-all"
-                      >
-                        {publishResult.pagesUrl}
-                      </a>
-                    </div>
-                    <div>
-                      📦 <strong>GitHub Kaynak Kodu Deposu:</strong>{" "}
-                      <a
-                        href={publishResult.repoUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-mono text-slate-900 underline break-all"
-                      >
-                        {publishResult.repoUrl}
-                      </a>
-                    </div>
-                    <div className="text-[11px] text-slate-600 pt-1">
-                      Not: GitHub Pages ilk kez etkinleştirildiyse adresin tüm dünyada aktif olması 30-60 saniye sürebilir.
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setIsPublishModalOpen(false)}
-                  className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                >
-                  Kapat
-                </button>
-                <button
-                  type="submit"
-                  disabled={isPublishingKsf}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  <Globe className="h-4 w-4" />
-                  <span>
-                    {isPublishingKsf
-                      ? "GitHub 'ksf' Reposuna Yayınlanıyor..."
-                      : "Projeyi 'ksf' Reposunda Yayınla & Pages Aç"}
-                  </span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {renderGitHubPublishModal()}
     </div>
   );
 }
