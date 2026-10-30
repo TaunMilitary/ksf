@@ -23,6 +23,7 @@ import {
 import { getCaseTypeVisualMeta } from "../data/fatsaData";
 import {
   formatAdaParselLabel,
+  formatAddressLabel,
   formatAreaM2,
   formatDateTR,
   formatLongDateTR,
@@ -306,7 +307,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                           }`}
                         >
                           <span title={r.caseType}>
-                            {r.subjectType === "arac" ? "🚗" : cMeta.icon}
+                            {r.subjectType === "arac"
+                              ? "🚗"
+                              : r.subjectType === "adres"
+                              ? "🏠"
+                              : cMeta.icon}
                           </span>{" "}
                           <span className="font-mono text-emerald-700">{r.time}</span>{" "}
                           {r.subjectType === "arac" && r.vehicleInfo?.plateNo
@@ -377,6 +382,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   const status: InspectionStatus = rec.status || "planlandi";
                   const adaParselText = formatAdaParselLabel(rec);
                   const vehicleText = formatVehicleLabel(rec);
+                  const addressText = formatAddressLabel(rec);
                   const cMeta = getCaseTypeVisualMeta(rec.caseType);
                   return (
                     <div
@@ -495,6 +501,26 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                                     : ""}
                                 </span>
                               ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {addressText && (
+                        <div className="mt-1.5 rounded border border-teal-200 bg-teal-50/80 px-2 py-1 text-[11px] text-teal-950">
+                          <div className="font-bold">
+                            🏠 Adres: {rec.addressDetail || "Açık Adres Keşfi"}
+                          </div>
+                          {(rec.bagimsizBolumNo || rec.nitelik) && (
+                            <div className="text-teal-800 mt-0.5 font-medium">
+                              {[
+                                rec.bagimsizBolumNo
+                                  ? `Daire / Bağımsız Bölüm No: ${rec.bagimsizBolumNo}`
+                                  : "",
+                                rec.nitelik ? `Nitelik: ${rec.nitelik}` : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
                             </div>
                           )}
                         </div>

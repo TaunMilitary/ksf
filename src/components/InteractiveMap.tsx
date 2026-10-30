@@ -12,6 +12,7 @@ import {
   calculatePolygonAreaM2,
   extractRecordLocationStops,
   formatAdaParselLabel,
+  formatAddressLabel,
   formatAreaM2,
   formatDateTR,
   formatVehicleLabel,
@@ -444,12 +445,13 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       inspections.forEach((rec) => {
         const adaParselText = formatAdaParselLabel(rec);
         const vehicleText = formatVehicleLabel(rec);
+        const addressText = formatAddressLabel(rec);
         const cMeta = getCaseTypeVisualMeta(rec.caseType);
         const existingIcon = L.divIcon({
           className: "custom-div-icon",
           html: `
             <div title="[${rec.district || "Fatsa"}] ${rec.neighborhood} - ${rec.caseType} (${formatDateTR(rec.date)})" style="display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:${cMeta.bgColor};color:#ffffff;border:2px solid #ffffff;box-shadow:0 2px 6px rgba(15,23,42,0.3);font-size:13px;opacity:0.9;">
-              ${rec.subjectType === "arac" ? "🚗" : cMeta.icon}
+              ${rec.subjectType === "arac" ? "🚗" : rec.subjectType === "adres" ? "🏠" : cMeta.icon}
             </div>
           `,
           iconSize: [28, 28],
@@ -472,6 +474,11 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                 ? `<div style="font-size:11px;font-weight:700;color:#b45309;margin-top:2px;">📐 ${adaParselText}${rec.yuzolcumuM2 ? ` (${formatAreaM2(rec.yuzolcumuM2)} m²)` : ""}</div>`
                 : ""
             }
+            ${
+              addressText
+                ? `<div style="font-size:11px;font-weight:700;color:#0f766e;margin-top:2px;">🏠 ${addressText}</div>`
+                : ""
+            }
             <div style="font-size:12px;color:#1e293b;margin-top:2px;">Dosya: <strong>${rec.esasNo}</strong></div>
             ${rec.experts ? `<div style="font-size:11px;color:#475569;margin-top:2px;">Bilirkişi: ${rec.experts}</div>` : ""}
             ${rec.createdBy ? `<div style="font-size:10px;color:#64748b;margin-top:2px;">Ekleyen: <strong>${rec.createdBy}</strong></div>` : ""}
@@ -479,26 +486,28 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
         `);
         m.addTo(layerGroup);
 
-        if (rec.parcels && rec.parcels.length > 0) {
-          rec.parcels.forEach((p) => {
-            if (p.polygon && p.polygon.length >= 3) {
-              L.polygon(p.polygon, {
-                color: cMeta.bgColor,
-                weight: 1.8,
-                fillColor: cMeta.bgColor,
-                fillOpacity: 0.18,
-                dashArray: "3, 4",
-              }).addTo(layerGroup);
-            }
-          });
-        } else if (rec.parcelPolygon && rec.parcelPolygon.length >= 3) {
-          L.polygon(rec.parcelPolygon, {
-            color: cMeta.bgColor,
-            weight: 1.8,
-            fillColor: cMeta.bgColor,
-            fillOpacity: 0.18,
-            dashArray: "3, 4",
-          }).addTo(layerGroup);
+        if (rec.subjectType !== "arac" && rec.subjectType !== "adres") {
+          if (rec.parcels && rec.parcels.length > 0) {
+            rec.parcels.forEach((p) => {
+              if (p.polygon && p.polygon.length >= 3) {
+                L.polygon(p.polygon, {
+                  color: cMeta.bgColor,
+                  weight: 1.8,
+                  fillColor: cMeta.bgColor,
+                  fillOpacity: 0.18,
+                  dashArray: "3, 4",
+                }).addTo(layerGroup);
+              }
+            });
+          } else if (rec.parcelPolygon && rec.parcelPolygon.length >= 3) {
+            L.polygon(rec.parcelPolygon, {
+              color: cMeta.bgColor,
+              weight: 1.8,
+              fillColor: cMeta.bgColor,
+              fillOpacity: 0.18,
+              dashArray: "3, 4",
+            }).addTo(layerGroup);
+          }
         }
       });
 
@@ -557,6 +566,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
         const cMeta = getCaseTypeVisualMeta(rec.caseType);
         const adaParselText = formatAdaParselLabel(rec);
         const vehicleText = formatVehicleLabel(rec);
+        const addressText = formatAddressLabel(rec);
         const recordStops = extractRecordLocationStops(rec);
         const uniqueNeighs = getRecordUniqueNeighborhoods(rec);
 
@@ -575,50 +585,52 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           }
         });
 
-        // Render multi-parcel boundary polygons if available
-        if (rec.parcels && rec.parcels.length > 0) {
-          rec.parcels.forEach((p, pIdx) => {
-            if (p.polygon && p.polygon.length >= 3) {
-              const polyLayer = L.polygon(p.polygon, {
-                color: isFocused ? "#ea580c" : cMeta.bgColor,
-                weight: isFocused ? 3.5 : 2.5,
-                opacity: 0.95,
-                fillColor: isFocused ? "#f59e0b" : cMeta.bgColor,
-                fillOpacity: isFocused ? 0.42 : 0.25,
-              }).addTo(layerGroup);
+        // Render multi-parcel boundary polygons if available (only for tasinmaz)
+        if (rec.subjectType !== "arac" && rec.subjectType !== "adres") {
+          if (rec.parcels && rec.parcels.length > 0) {
+            rec.parcels.forEach((p, pIdx) => {
+              if (p.polygon && p.polygon.length >= 3) {
+                const polyLayer = L.polygon(p.polygon, {
+                  color: isFocused ? "#ea580c" : cMeta.bgColor,
+                  weight: isFocused ? 3.5 : 2.5,
+                  opacity: 0.95,
+                  fillColor: isFocused ? "#f59e0b" : cMeta.bgColor,
+                  fillOpacity: isFocused ? 0.42 : 0.25,
+                }).addTo(layerGroup);
 
-              polyLayer.bindPopup(`
-                <div style="min-width:210px;">
-                  <div style="font-size:10px;font-weight:700;color:${cMeta.bgColor};">${rec.esasNo} · ${pIdx + 1}. PARSEL</div>
-                  <div style="font-size:13px;font-weight:800;color:#0f172a;margin-top:2px;">📍 ${p.neighborhood || rec.neighborhood}</div>
-                  <div style="font-size:13px;font-weight:700;color:#b45309;margin-top:2px;">📐 ${p.adaNo} Ada / ${p.parselNo} Parsel</div>
-                  ${p.yuzolcumuM2 ? `<div style="font-size:11px;font-family:monospace;color:#059669;font-weight:700;margin-top:2px;">Yüzölçümü: ${formatAreaM2(p.yuzolcumuM2)} m²</div>` : ""}
-                </div>
-              `);
+                polyLayer.bindPopup(`
+                  <div style="min-width:210px;">
+                    <div style="font-size:10px;font-weight:700;color:${cMeta.bgColor};">${rec.esasNo} · ${pIdx + 1}. PARSEL</div>
+                    <div style="font-size:13px;font-weight:800;color:#0f172a;margin-top:2px;">📍 ${p.neighborhood || rec.neighborhood}</div>
+                    <div style="font-size:13px;font-weight:700;color:#b45309;margin-top:2px;">📐 ${p.adaNo} Ada / ${p.parselNo} Parsel</div>
+                    ${p.yuzolcumuM2 ? `<div style="font-size:11px;font-family:monospace;color:#059669;font-weight:700;margin-top:2px;">Yüzölçümü: ${formatAreaM2(p.yuzolcumuM2)} m²</div>` : ""}
+                  </div>
+                `);
 
-              if (isFocused) {
-                if (!focusedParcelBounds) {
-                  focusedParcelBounds = polyLayer.getBounds();
-                } else {
-                  focusedParcelBounds.extend(polyLayer.getBounds());
+                if (isFocused) {
+                  if (!focusedParcelBounds) {
+                    focusedParcelBounds = polyLayer.getBounds();
+                  } else {
+                    focusedParcelBounds.extend(polyLayer.getBounds());
+                  }
                 }
               }
-            }
-          });
-        } else if (rec.parcelPolygon && rec.parcelPolygon.length >= 3) {
-          const polyLayer = L.polygon(rec.parcelPolygon, {
-            color: isFocused ? "#ea580c" : cMeta.bgColor,
-            weight: isFocused ? 3.5 : 2.5,
-            opacity: 0.95,
-            fillColor: isFocused ? "#f59e0b" : cMeta.bgColor,
-            fillOpacity: isFocused ? 0.42 : 0.25,
-          }).addTo(layerGroup);
+            });
+          } else if (rec.parcelPolygon && rec.parcelPolygon.length >= 3) {
+            const polyLayer = L.polygon(rec.parcelPolygon, {
+              color: isFocused ? "#ea580c" : cMeta.bgColor,
+              weight: isFocused ? 3.5 : 2.5,
+              opacity: 0.95,
+              fillColor: isFocused ? "#f59e0b" : cMeta.bgColor,
+              fillOpacity: isFocused ? 0.42 : 0.25,
+            }).addTo(layerGroup);
 
-          if (isFocused) {
-            if (!focusedParcelBounds) {
-              focusedParcelBounds = polyLayer.getBounds();
-            } else {
-              focusedParcelBounds.extend(polyLayer.getBounds());
+            if (isFocused) {
+              if (!focusedParcelBounds) {
+                focusedParcelBounds = polyLayer.getBounds();
+              } else {
+                focusedParcelBounds.extend(polyLayer.getBounds());
+              }
             }
           }
         }
@@ -658,6 +670,8 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           const topBadgeText =
             rec.subjectType === "arac" && rec.vehicleInfo?.plateNo
               ? `🚗 ${rec.vehicleInfo.plateNo}`
+              : rec.subjectType === "adres"
+              ? `🏠 ${shortNeigh}`
               : isMultiStopFile
               ? `${shortNeigh}${stop.adaNo || stop.parselNo ? ` (${stop.adaNo || "0"}/${stop.parselNo || "1"})` : ""}`
               : rec.parcels && rec.parcels.length > 1
@@ -694,7 +708,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             };border-radius:50%;background:${cMeta.bgColor};color:#ffffff;border:${
               isFocused ? "3px solid #fde047" : "2.5px solid #ffffff"
             };box-shadow:0 4px 12px rgba(15,23,42,0.35);font-size:15px;">
-                  <span>${rec.subjectType === "arac" ? "🚗" : cMeta.icon}</span>
+                  <span>${rec.subjectType === "arac" ? "🚗" : rec.subjectType === "adres" ? "🏠" : cMeta.icon}</span>
                   ${
                     stopNumberBadge
                       ? `<span style="position:absolute;top:-5px;right:-6px;display:flex;align-items:center;justify-content:center;min-width:17px;height:17px;padding:0 3px;border-radius:999px;background:#0f172a;color:#ffffff;border:1.5px solid #ffffff;font-size:9px;font-weight:800;font-family:monospace;">
@@ -779,7 +793,14 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                   : ""
               }
               ${
-                rec.addressDetail
+                addressText
+                  ? `<div style="margin-top:5px;padding:5px 7px;background:#f0fdfa;border:1px solid #99f6e4;border-radius:6px;font-size:11px;color:#115e59;">
+                      <div style="font-weight:800;">🏠 Adres Bazlı Keşif</div>
+                      <div style="margin-top:1px;"><strong>${rec.addressDetail || stop.neighborhood}</strong></div>
+                      ${rec.bagimsizBolumNo ? `<div style="margin-top:1px;">Daire / Bağımsız Bölüm No: <strong>${rec.bagimsizBolumNo}</strong></div>` : ""}
+                      ${rec.nitelik ? `<div style="margin-top:1px;">Nitelik: <strong>${rec.nitelik}</strong></div>` : ""}
+                    </div>`
+                  : rec.addressDetail
                   ? `<div style="font-size:11px;color:#64748b;margin-top:3px;">${rec.addressDetail}</div>`
                   : ""
               }

@@ -31,7 +31,7 @@ export type ParcelBoundarySource =
   | "geojson_import"
   | "cadastre_computed";
 
-export type InspectionSubjectType = "tasinmaz" | "arac";
+export type InspectionSubjectType = "tasinmaz" | "adres" | "arac";
 
 export interface ParcelItem {
   id: string; // Örn: "155062-101-1"
@@ -82,7 +82,7 @@ export interface InspectionRecord {
   district: CourtDistrict; // Fatsa | Çamaş | Çatalpınar
   neighborhood: string; // Örn: Ilıca Mahallesi
   tkgmMahalleId?: number; // Resmi TKGM Mahalle ID
-  subjectType?: InspectionSubjectType; // "tasinmaz" (varsayılan) | "arac" (delil tespiti araç hasar)
+  subjectType?: InspectionSubjectType; // "tasinmaz" (varsayılan) | "adres" (açık adres / bina / daire) | "arac" (delil tespiti araç hasar)
   adaNo?: string; // Örn: "2058" (1. parsel veya tek parsel)
   parselNo?: string; // Örn: "1" (1. parsel veya tek parsel)
   bagimsizBolumNo?: string; // Örn: "3" (1. parsel veya tek parsel için Bağımsız Bölüm No)

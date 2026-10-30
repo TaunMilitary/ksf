@@ -307,29 +307,26 @@ export async function searchFatsaLocations(
 }
 
 /**
- * Harita üzerinden tıklanan noktanın mahalle ve ilçe adını bulur
+ * Harita üzerinden tıklanan noktanın mahalle, ilçe ve varsa cadde/sokak/bina adını bulur
  */
 export async function reverseGeocodeFatsaPoint(
   lat: number,
   lng: number,
   preferredDistrict?: CourtDistrict
-): Promise<{ name: string; district: CourtDistrict; corridor: string }> {
+): Promise<{
+  name: string;
+  district: CourtDistrict;
+  corridor: string;
+  roadOrAddress?: string;
+}> {
   const nearestLocal = findNearestLocalNeighborhood(
     lat,
     lng,
     preferredDistrict || "Tümü"
   );
 
-  if (nearestLocal.distanceKm <= 1.2) {
-    return {
-      name: nearestLocal.neighborhood.name,
-      district: nearestLocal.neighborhood.district,
-      corridor: nearestLocal.neighborhood.corridor,
-    };
-  }
-
   try {
-    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=14&addressdetails=1`;
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`;
     const res = await fetch(url, {
       headers: { "Accept-Language": "tr" },
     });
@@ -341,6 +338,26 @@ export async function reverseGeocodeFatsaPoint(
         data.address?.neighbourhood ||
         data.address?.hamlet ||
         data.name;
+
+      const roadPart =
+        data.address?.road ||
+        data.address?.pedestrian ||
+        data.address?.residential ||
+        data.address?.Commercial ||
+        "";
+      const buildingPart =
+        data.address?.building ||
+        data.address?.apartments ||
+        data.address?.shop ||
+        data.address?.amenity ||
+        "";
+      const houseNo = data.address?.house_number
+        ? `No: ${data.address.house_number}`
+        : "";
+      const roadOrAddress = [roadPart, buildingPart, houseNo]
+        .filter(Boolean)
+        .join(" ")
+        .trim();
 
       let detectedDistrict: CourtDistrict = nearestLocal.neighborhood.district;
       const addrCounty = (
@@ -363,20 +380,143 @@ export async function reverseGeocodeFatsaPoint(
             ? raw
             : `${raw} Mahallesi`;
         return {
-          name: formattedName,
+          name:
+            nearestLocal.distanceKm <= 0.8
+              ? nearestLocal.neighborhood.name
+              : formattedName,
           district: detectedDistrict,
           corridor: nearestLocal.neighborhood.corridor,
+          roadOrAddress: roadOrAddress || undefined,
+        };
+      }
+
+      if (roadOrAddress) {
+        return {
+          name: nearestLocal.neighborhood.name,
+          district: detectedDistrict,
+          corridor: nearestLocal.neighborhood.corridor,
+          roadOrAddress,
         };
       }
     }
   } catch {
-    // Fallback to nearest local neighborhood
+    // Fallback to nearest local neighborhood below
   }
 
   return {
-    name: `${nearestLocal.neighborhood.name} Mevkii`,
+    name:
+      nearestLocal.distanceKm <= 1.2
+        ? nearestLocal.neighborhood.name
+        : `${nearestLocal.neighborhood.name} Mevkii`,
     district: nearestLocal.neighborhood.district,
     corridor: nearestLocal.neighborhood.corridor,
+  };
+}
+
+/**
+ * Adres bazlı keşiflerde yazılan Cadde / Sokak / Bina / Açık Adresi Nominatim üzerinden sorgular
+ * ve harita üzerinde nokta koordinatını (bulunamazsa mahalle merkezini) döndürür.
+ */
+export async function geocodeStreetAddressInDistrict(
+  addressText: string,
+  neighborhood: string,
+  district: CourtDistrict
+): Promise<{
+  lat: number;
+  lng: number;
+  matchedNeighborhood: string;
+  district: CourtDistrict;
+  displayLabel: string;
+  foundExactStreet: boolean;
+}> {
+  const cleanAddr = addressText.trim();
+  const cleanNeigh = neighborhood.trim();
+  const cleanNeighShort = cleanNeigh.replace(/\s+Mahallesi$/i, "").trim();
+
+  if (cleanAddr.length >= 2) {
+    const queries = [
+      `${cleanAddr}, ${cleanNeighShort}, ${district}, Ordu, Türkiye`,
+      `${cleanAddr}, ${district}, Ordu, Türkiye`,
+    ];
+
+    for (const q of queries) {
+      try {
+        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+          q
+        )}&addressdetails=1&limit=3&countrycodes=tr`;
+        const res = await fetch(url, {
+          headers: { "Accept-Language": "tr" },
+        });
+        if (res.ok) {
+          const items = await res.json();
+          if (Array.isArray(items) && items.length > 0) {
+            const first = items[0];
+            const lat = parseFloat(first.lat);
+            const lng = parseFloat(first.lon);
+            if (!isNaN(lat) && !isNaN(lng)) {
+              const nearest = findNearestLocalNeighborhood(lat, lng, district);
+              // Sadece bölge sınırları içindeyse (Adliye'ye < 45 km) kabul et
+              if (
+                calculateHaversineKm(
+                  FATSA_COURTHOUSE.lat,
+                  FATSA_COURTHOUSE.lng,
+                  lat,
+                  lng
+                ) <= 45
+              ) {
+                const subName =
+                  first.address?.suburb ||
+                  first.address?.neighbourhood ||
+                  first.address?.village ||
+                  "";
+                const resolvedNeigh = subName
+                  ? subName.toLocaleLowerCase("tr-TR").includes("mahalle")
+                    ? subName
+                    : `${subName} Mahallesi`
+                  : cleanNeigh || nearest.neighborhood.name;
+                return {
+                  lat: Number(lat.toFixed(6)),
+                  lng: Number(lng.toFixed(6)),
+                  matchedNeighborhood: resolvedNeigh,
+                  district: nearest.neighborhood.district || district,
+                  displayLabel:
+                    first.display_name?.split(",").slice(0, 3).join(", ") ||
+                    cleanAddr,
+                  foundExactStreet: true,
+                };
+              }
+            }
+          }
+        }
+      } catch {
+        // continue to next query or local fallback
+      }
+    }
+  }
+
+  // Sokak Nominatim'de bulunamazsa seçili mahallenin koordinatını döndür
+  const fallbackNeigh = resolveNeighborhoodCoordinates(cleanNeigh, district);
+  if (fallbackNeigh) {
+    return {
+      lat: fallbackNeigh.lat,
+      lng: fallbackNeigh.lng,
+      matchedNeighborhood: fallbackNeigh.matchedName,
+      district: fallbackNeigh.district,
+      displayLabel: `${fallbackNeigh.matchedName} (${cleanAddr || "Mahalle Merkezi"})`,
+      foundExactStreet: false,
+    };
+  }
+
+  const firstInDist =
+    FATSA_NEIGHBORHOODS.find((n) => n.district === district) ||
+    FATSA_NEIGHBORHOODS[0];
+  return {
+    lat: firstInDist.lat,
+    lng: firstInDist.lng,
+    matchedNeighborhood: cleanNeigh || firstInDist.name,
+    district,
+    displayLabel: `${cleanNeigh || firstInDist.name} (${district})`,
+    foundExactStreet: false,
   };
 }
 
@@ -625,8 +765,13 @@ export function extractRecordLocationStops(
     "stopIndexInRecord" | "totalStopsInRecord"
   >[] = [];
 
-  // 1. Önce dosyadaki çoklu parselleri (rec.parcels) incele
-  if (rec.parcels && rec.parcels.length > 0) {
+  // 1. Önce dosyadaki çoklu parselleri (rec.parcels) incele (Sadece taşınmaz keşiflerinde)
+  if (
+    rec.subjectType !== "arac" &&
+    rec.subjectType !== "adres" &&
+    rec.parcels &&
+    rec.parcels.length > 0
+  ) {
     for (const p of rec.parcels) {
       const pNeigh = (p.neighborhood || rec.neighborhood || "").trim();
       let pLat = p.centerLat;
@@ -681,25 +826,51 @@ export function extractRecordLocationStops(
 
   // 2. Ayrıca rec.neighborhood içinde birden fazla mahalle adı yazılmışsa (Örn: "Saraytepe Mah. / Ilıca Mah.") ve yukarıdaki parsellerde yoksa onları da ekle
   const allMentionedNeighborhoods = getRecordUniqueNeighborhoods(rec);
-  for (const neighName of allMentionedNeighborhoods) {
+  for (let i = 0; i < allMentionedNeighborhoods.length; i++) {
+    const neighName = allMentionedNeighborhoods[i];
     const neighKey = normalizeMahalleKey(neighName);
     const alreadyInStops = rawStops.some(
       (s) => normalizeMahalleKey(s.neighborhood) === neighKey
     );
     if (!alreadyInStops) {
       const resolved = resolveNeighborhoodCoordinates(neighName, rec.district);
-      const stopLat = resolved ? resolved.lat : rec.lat;
-      const stopLng = resolved ? resolved.lng : rec.lng;
+      // Eğer tek mahalleli (veya ilk duraklı) adres/araç/taşınmaz kaydıysa ve rec.lat/rec.lng seçilmişse doğrudan nokta koordinatını koru!
+      const useExactRecordCoord =
+        rawStops.length === 0 &&
+        allMentionedNeighborhoods.length <= 1 &&
+        Boolean(rec.lat && rec.lng);
+      const stopLat = useExactRecordCoord
+        ? rec.lat
+        : resolved
+        ? resolved.lat
+        : rec.lat;
+      const stopLng = useExactRecordCoord
+        ? rec.lng
+        : resolved
+        ? resolved.lng
+        : rec.lng;
       rawStops.push({
         lat: stopLat,
         lng: stopLng,
         neighborhood: resolved ? resolved.matchedName : neighName,
         district: resolved ? resolved.district : rec.district,
-        adaNo: rawStops.length === 0 ? rec.adaNo : undefined,
-        parselNo: rawStops.length === 0 ? rec.parselNo : undefined,
-        yuzolcumuM2: rawStops.length === 0 ? rec.yuzolcumuM2 : undefined,
+        adaNo:
+          rawStops.length === 0 && rec.subjectType === "tasinmaz"
+            ? rec.adaNo
+            : undefined,
+        parselNo:
+          rawStops.length === 0 && rec.subjectType === "tasinmaz"
+            ? rec.parselNo
+            : undefined,
+        yuzolcumuM2:
+          rawStops.length === 0 && rec.subjectType === "tasinmaz"
+            ? rec.yuzolcumuM2
+            : undefined,
         nitelik: rawStops.length === 0 ? rec.nitelik : undefined,
-        polygon: rawStops.length === 0 ? rec.parcelPolygon : undefined,
+        polygon:
+          rawStops.length === 0 && rec.subjectType === "tasinmaz"
+            ? rec.parcelPolygon
+            : undefined,
         label: `${neighName} (${rec.district} - ${rec.esasNo})`,
       });
     }
@@ -712,11 +883,11 @@ export function extractRecordLocationStops(
       lng: rec.lng,
       neighborhood: rec.neighborhood,
       district: rec.district,
-      adaNo: rec.adaNo,
-      parselNo: rec.parselNo,
-      yuzolcumuM2: rec.yuzolcumuM2,
+      adaNo: rec.subjectType === "tasinmaz" ? rec.adaNo : undefined,
+      parselNo: rec.subjectType === "tasinmaz" ? rec.parselNo : undefined,
+      yuzolcumuM2: rec.subjectType === "tasinmaz" ? rec.yuzolcumuM2 : undefined,
       nitelik: rec.nitelik,
-      polygon: rec.parcelPolygon,
+      polygon: rec.subjectType === "tasinmaz" ? rec.parcelPolygon : undefined,
       label: `${rec.neighborhood} (${rec.district} - ${rec.esasNo})`,
     });
   }
@@ -1482,7 +1653,7 @@ export async function fetchNearbyTkgmParcels(params: {
  * Kaydın Ada / Parsel ve varsa Bağımsız Bölüm No bilgisini (çoklu parsel desteğiyle) okunaklı etiket olarak döndürür
  */
 export function formatAdaParselLabel(rec: {
-  subjectType?: "tasinmaz" | "arac";
+  subjectType?: "tasinmaz" | "adres" | "arac";
   adaNo?: string;
   parselNo?: string;
   bagimsizBolumNo?: string;
@@ -1490,7 +1661,7 @@ export function formatAdaParselLabel(rec: {
   yuzolcumuM2?: number;
   parcels?: ParcelItem[];
 }): string | null {
-  if (rec.subjectType === "arac") return null;
+  if (rec.subjectType === "arac" || rec.subjectType === "adres") return null;
   if (rec.parcels && rec.parcels.length > 1) {
     const shortList = rec.parcels
       .slice(0, 3)
@@ -1521,10 +1692,54 @@ export function formatAdaParselLabel(rec: {
 }
 
 /**
+ * Adres bazlı keşif kayıtları (veya ada/parsel girilmeden açık adres girilen kayıtlar) için
+ * açık adres, bağımsız bölüm / daire numarası ve nitelik etiketini döndürür
+ */
+export function formatAddressLabel(rec: {
+  subjectType?: "tasinmaz" | "adres" | "arac";
+  addressDetail?: string;
+  bagimsizBolumNo?: string;
+  nitelik?: string;
+  adaNo?: string;
+  parselNo?: string;
+  parcels?: ParcelItem[];
+}): string | null {
+  if (rec.subjectType === "arac") return null;
+  const hasAnyParcel =
+    rec.subjectType !== "adres" &&
+    Boolean(
+      rec.adaNo ||
+        rec.parselNo ||
+        (rec.parcels && rec.parcels.length > 0)
+    );
+  if (hasAnyParcel) return null;
+
+  const addr = (rec.addressDetail || "").trim();
+  const bb = (rec.bagimsizBolumNo || "").trim();
+  const nit = (rec.nitelik || "").trim();
+
+  if (rec.subjectType !== "adres" && !addr && !bb) return null;
+
+  const parts: string[] = [];
+  if (addr) {
+    parts.push(addr);
+  } else {
+    parts.push("Adres Bazlı Keşif");
+  }
+  if (bb) {
+    parts.push(`Daire / B.Bölüm No: ${bb}`);
+  }
+  if (nit) {
+    parts.push(`(${nit})`);
+  }
+  return parts.join(" · ");
+}
+
+/**
  * Araç keşif / delil tespiti kayıtları için plaka ve araç etiketini döndürür
  */
 export function formatVehicleLabel(rec: {
-  subjectType?: "tasinmaz" | "arac";
+  subjectType?: "tasinmaz" | "adres" | "arac";
   vehicleInfo?: VehicleInspectionInfo;
 }): string | null {
   if (rec.subjectType !== "arac" || !rec.vehicleInfo?.plateNo) return null;

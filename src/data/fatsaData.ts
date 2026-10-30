@@ -214,6 +214,27 @@ export const VEHICLE_INSPECTION_PLACE_PRESETS: string[] = [
   "Dolunay Mah. Otopark / İnceleme Noktası",
 ];
 
+export const ADDRESS_NITELIK_PRESETS: string[] = [
+  "Konut / Mesken (Daire)",
+  "Dükkan / İşyeri",
+  "Depo / İmalathane",
+  "Bina / Apartman Ortak Alanı",
+  "Müstakil Konut / Ev",
+  "İnşaat / Şantiye Alanı",
+  "Ofis / Büro",
+];
+
+export const FATSA_STREET_PRESETS: string[] = [
+  "Mustafa Kemal Paşa Mah. Sakarya Cad.",
+  "Mustafa Kemal Paşa Mah. Sahil Cad.",
+  "Mustafa Kemal Paşa Mah. Ata Cad.",
+  "Dumlupınar Mah. Reşadiye Cad.",
+  "Dolunay Mah. Çamlık Cad.",
+  "Evkaf Mah. Sanayi Sitesi Sok.",
+  "Kurtuluş Mah. Cumhuriyet Meydanı",
+  "Şerefiye Mah. Meydan Sok.",
+];
+
 export interface UserTitleOption {
   title: CourtUserTitle;
   icon: string;

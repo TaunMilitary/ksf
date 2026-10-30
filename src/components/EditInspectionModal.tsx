@@ -6,12 +6,14 @@ import {
   Trash2,
   Layers,
   Car,
+  Home,
   Users,
   UserCheck,
   MapPin,
   RefreshCw,
   Check,
   Sparkles,
+  Search,
 } from "lucide-react";
 import {
   CourtDistrict,
@@ -21,12 +23,14 @@ import {
   ParcelItem,
 } from "../types";
 import {
+  ADDRESS_NITELIK_PRESETS,
   CASE_TYPES,
   DEFAULT_EXPERT_TITLES,
   DISTRICTS,
   EXPERT_PRESETS,
   FATSA_COURTHOUSE,
   FATSA_NEIGHBORHOODS,
+  FATSA_STREET_PRESETS,
   PARCEL_NITELIK_PRESETS,
   VEHICLE_INSPECTION_PLACE_PRESETS,
   VEHICLE_TYPE_PRESETS,
@@ -40,6 +44,7 @@ import {
   extractRecordLocationStops,
   fetchNearbyTkgmParcels,
   formatAreaM2,
+  geocodeStreetAddressInDistrict,
   getRecordUniqueNeighborhoods,
   queryParcelBoundary,
 } from "../services/geoService";
@@ -98,6 +103,9 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
 
   // Adres, Bilirkişi, Notlar, Ekleyen Kişi ve Mesafe/Koordinat
   const [addressDetail, setAddressDetail] = useState("");
+  const [addressBbNo, setAddressBbNo] = useState("");
+  const [addressNitelik, setAddressNitelik] = useState("");
+  const [isGeocodingAddress, setIsGeocodingAddress] = useState(false);
   const [expertsText, setExpertsText] = useState("");
   const [notes, setNotes] = useState("");
   const [createdBy, setCreatedBy] = useState("");
@@ -182,6 +190,8 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
     );
 
     setAddressDetail(record.addressDetail || "");
+    setAddressBbNo(record.bagimsizBolumNo || "");
+    setAddressNitelik(record.nitelik || "");
     setExpertsText(record.experts || "");
     setNotes(record.notes || "");
     setCreatedBy(record.createdBy || "");
@@ -577,6 +587,16 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
       updatedRecord.paftaNo = undefined;
       updatedRecord.parcelPolygon = undefined;
       updatedRecord.parcels = undefined;
+    } else if (subjectType === "adres") {
+      updatedRecord.vehicleInfo = undefined;
+      updatedRecord.adaNo = undefined;
+      updatedRecord.parselNo = undefined;
+      updatedRecord.bagimsizBolumNo = addressBbNo.trim() || undefined;
+      updatedRecord.nitelik = addressNitelik.trim() || undefined;
+      updatedRecord.yuzolcumuM2 = undefined;
+      updatedRecord.paftaNo = undefined;
+      updatedRecord.parcelPolygon = undefined;
+      updatedRecord.parcels = undefined;
     } else {
       updatedRecord.vehicleInfo = undefined;
       updatedRecord.adaNo = primaryParcel?.adaNo || undefined;
@@ -816,13 +836,13 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
             </div>
           </div>
 
-          {/* 4. Satır: Keşif Konusu (Taşınmaz vs Araç) */}
+          {/* 4. Satır: Keşif Konusu (Taşınmaz vs Adres Bazlı vs Araç) */}
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-bold text-slate-800">
                 Keşif İnceleme Konusu:
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setSubjectType("tasinmaz")}
@@ -834,6 +854,18 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
                 >
                   <Layers className="h-3.5 w-3.5 text-amber-600" />
                   <span>📐 Taşınmaz (Ada / Parsel)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSubjectType("adres")}
+                  className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-bold transition-all ${
+                    subjectType === "adres"
+                      ? "border-teal-600 bg-teal-50 text-teal-950"
+                      : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                  }`}
+                >
+                  <Home className="h-3.5 w-3.5 text-teal-600" />
+                  <span>🏠 Adres Bazlı (Cadde / Sokak / Daire)</span>
                 </button>
                 <button
                   type="button"
@@ -1192,6 +1224,111 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
                     <option key={item} value={item} />
                   ))}
                 </datalist>
+              </div>
+            ) : subjectType === "adres" ? (
+              /* Adres Bazlı Keşif Düzenleme Paneli */
+              <div className="space-y-3 rounded-xl border border-teal-300 bg-teal-50/60 p-3.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-teal-950">
+                    <Home className="h-4 w-4 text-teal-700" />
+                    <span>
+                      🏠 Adres Bazlı Keşif Detayları (Cadde / Sokak / Bina / Daire)
+                    </span>
+                  </div>
+                  <span className="rounded bg-teal-700 px-2 py-0.5 text-[10px] font-bold text-white">
+                    Ada/Parsel Gerekmeden Açık Adres Keşfi
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-12 items-end">
+                  <div className="sm:col-span-6">
+                    <label className="block text-[11px] font-bold text-slate-800 mb-1">
+                      Açık Adres (Cadde / Sokak / Bina-Site Adı / Dış Kapı No) *
+                    </label>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        required={subjectType === "adres"}
+                        list="edit-street-presets"
+                        value={addressDetail}
+                        onChange={(e) => setAddressDetail(e.target.value)}
+                        placeholder="Örn: Sakarya Cad. Aydın Apt. No: 42"
+                        className="w-full rounded-lg border border-teal-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-900 focus:border-teal-600 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        disabled={isGeocodingAddress}
+                        onClick={async () => {
+                          setIsGeocodingAddress(true);
+                          try {
+                            const geo = await geocodeStreetAddressInDistrict(
+                              addressDetail,
+                              neighborhood,
+                              district
+                            );
+                            setLat(geo.lat);
+                            setLng(geo.lng);
+                            if (geo.matchedNeighborhood) {
+                              setNeighborhood(geo.matchedNeighborhood);
+                            }
+                            await recalculateDistanceForCoords(
+                              geo.lat,
+                              geo.lng,
+                              [],
+                              geo.matchedNeighborhood || neighborhood
+                            );
+                          } finally {
+                            setIsGeocodingAddress(false);
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 rounded-lg bg-teal-700 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-teal-800 disabled:opacity-50 whitespace-nowrap shrink-0"
+                        title="Adresi haritada bul ve Adliye mesafesini güncelle"
+                      >
+                        <Search className="h-3.5 w-3.5" />
+                        <span>
+                          {isGeocodingAddress ? "Aranıyor..." : "Konumu Bul"}
+                        </span>
+                      </button>
+                    </div>
+                    <datalist id="edit-street-presets">
+                      {FATSA_STREET_PRESETS.map((st) => (
+                        <option key={st} value={st} />
+                      ))}
+                    </datalist>
+                  </div>
+
+                  <div className="sm:col-span-3">
+                    <label className="block text-[11px] font-bold text-slate-800 mb-1">
+                      Kat / Daire (Bağımsız Bölüm) No
+                    </label>
+                    <input
+                      type="text"
+                      value={addressBbNo}
+                      onChange={(e) => setAddressBbNo(e.target.value)}
+                      placeholder="Örn: Kat: 2, Daire: 5"
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-mono font-bold text-teal-950 focus:border-teal-600 focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-3">
+                    <label className="block text-[11px] font-bold text-slate-800 mb-1">
+                      İncelenen Yerin Niteliği
+                    </label>
+                    <input
+                      type="text"
+                      list="edit-address-nitelik-list"
+                      value={addressNitelik}
+                      onChange={(e) => setAddressNitelik(e.target.value)}
+                      placeholder="Örn: Konut / Dükkan / İşyeri"
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 focus:border-teal-600 focus:outline-none"
+                    />
+                    <datalist id="edit-address-nitelik-list">
+                      {ADDRESS_NITELIK_PRESETS.map((an) => (
+                        <option key={an} value={an} />
+                      ))}
+                    </datalist>
+                  </div>
+                </div>
               </div>
             ) : (
               /* Araç Düzenleme Paneli */

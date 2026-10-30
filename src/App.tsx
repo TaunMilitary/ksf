@@ -43,6 +43,7 @@ import {
   ShieldCheck,
   KeyRound,
   Pencil,
+  Home,
 } from "lucide-react";
 import {
   ActiveTab,
@@ -60,6 +61,7 @@ import {
   WeatherForecast,
 } from "./types";
 import {
+  ADDRESS_NITELIK_PRESETS,
   CASE_TYPES,
   DEFAULT_APPS_SCRIPT_URL,
   DEFAULT_EXPERT_TITLES,
@@ -67,6 +69,7 @@ import {
   EXPERT_PRESETS,
   FATSA_COURTHOUSE,
   FATSA_NEIGHBORHOODS,
+  FATSA_STREET_PRESETS,
   getCaseTypeVisualMeta,
   getInitialSampleInspections,
   INITIAL_SARAYTEPE_101_1_POLYGON,
@@ -84,11 +87,13 @@ import {
   fetchTkgmParcelByCoordinate,
   findSmartRouteSuggestions,
   formatAdaParselLabel,
+  formatAddressLabel,
   formatAreaM2,
   formatDateTR,
   formatLongDateTR,
   formatUserProfileCreator,
   formatVehicleLabel,
+  geocodeStreetAddressInDistrict,
   getRecordUniqueNeighborhoods,
   NominatimSearchResult,
   parseTkgmGeoJson,
@@ -388,9 +393,11 @@ export default function App() {
   const [caseType, setCaseType] = useState<string>(CASE_TYPES[0]);
   const [formStatus, setFormStatus] = useState<InspectionStatus>("planlandi");
 
-  // Keşif Konusu: Taşınmaz (Ada/Parsel - Çoklu Parsel) veya Araç (Plaka Bilgisi / Hasar Tespiti)
+  // Keşif Konusu: Taşınmaz (Ada/Parsel), Adres Bazlı (Cadde/Sokak/Kapı No) veya Araç (Plaka Bilgisi / Hasar Tespiti)
   const [subjectType, setSubjectType] =
     useState<InspectionSubjectType>("tasinmaz");
+  const [isGeocodingFormAddress, setIsGeocodingFormAddress] =
+    useState<boolean>(false);
 
   // Çoklu Parsel Listesi & Yakın Parsel Önerileri State (Boş başlar, eklenen parseller asla birbirini ezmez)
   const [formParcels, setFormParcels] = useState<ParcelItem[]>([]);
@@ -671,7 +678,7 @@ export default function App() {
 
   // CANLI TKGM MEGSİS OTOMATİK SORGU: Kullanıcı Mahalle + Ada / Parsel yazdığında TKGM'den gerçek parsel sınırını ve yüzölçümünü otomatik çeker ve haritada çizer
   useEffect(() => {
-    if (parcelSource === "geojson_import") {
+    if (subjectType !== "tasinmaz" || parcelSource === "geojson_import") {
       return;
     }
 
@@ -812,6 +819,7 @@ export default function App() {
       clearTimeout(timer);
     };
   }, [
+    subjectType,
     adaNo,
     parselNo,
     formDistrict,
@@ -865,6 +873,7 @@ export default function App() {
 
   // Haritada hem eklenmiş tüm parselleri hem de şu an kutuda yazılan parseli birlikte göstermek için birleştirilmiş liste
   const combinedPreviewParcels = useMemo<ParcelItem[]>(() => {
+    if (subjectType !== "tasinmaz") return [];
     const list = [...formParcels];
     const currentItem = buildCurrentInputParcelItem();
     if (currentItem) {
@@ -879,7 +888,7 @@ export default function App() {
       }
     }
     return list;
-  }, [formParcels, buildCurrentInputParcelItem]);
+  }, [subjectType, formParcels, buildCurrentInputParcelItem]);
 
   // Önerilen bir komşu parsele tıklandığında: eğer henüz listeye hiç parsel eklenmemişse (prev.length === 0) ve kutuda tam sorgulanmış 1. parsel varsa onu korur, ardından tıklanan parseli ekler
   const handleAddParcelItemToList = useCallback(
@@ -1198,7 +1207,7 @@ export default function App() {
     setAiAnalysisResult(null);
   };
 
-  // Select a location by clicking directly on Leaflet map (Fetches real TKGM parcel at clicked coordinate!)
+  // Select a location by clicking directly on Leaflet map (Fetches real TKGM parcel in tasinmaz mode, or reverse geocodes street/address in adres/arac mode!)
   const handleMapPointClick = useCallback(
     async (lat: number, lng: number) => {
       setBaseNeighborhoodLat(lat);
@@ -1206,6 +1215,27 @@ export default function App() {
       setSelectedLat(lat);
       setSelectedLng(lng);
       setAiAnalysisResult(null);
+
+      // Eğer Adres Bazlı veya Araç İncelemesi modundaysa TKGM parsel sorgulama, doğrudan sokak/cadde/mahalle adresini çöz!
+      if (subjectType !== "tasinmaz") {
+        setParcelPolygon([]);
+        const rev = await reverseGeocodeFatsaPoint(lat, lng, formDistrict);
+        setNeighborhoodInput(rev.name);
+        setFormDistrict(rev.district);
+        setSelectedCorridor(rev.corridor);
+        const matched = resolveTkgmMahalle(rev.district, rev.name);
+        setSelectedTkgmMahalleId(matched?.id);
+
+        if (subjectType === "adres" && rev.roadOrAddress) {
+          setAddressDetail(rev.roadOrAddress);
+          setFormBannerMessage(
+            `✓ Haritadan Adres Konumu Seçildi: [${rev.district}] ${rev.name} · ${rev.roadOrAddress}`
+          );
+          setTimeout(() => setFormBannerMessage(null), 4000);
+        }
+        return;
+      }
+
       setIsQueryingParcel(true);
 
       try {
@@ -1269,8 +1299,41 @@ export default function App() {
       const matched = resolveTkgmMahalle(rev.district, rev.name);
       setSelectedTkgmMahalleId(matched?.id);
     },
-    [formDistrict, neighborhoodInput]
+    [formDistrict, neighborhoodInput, subjectType]
   );
+
+  // Adres bazlı keşifte yazılan cadde/sokak/bina adresini haritada bulup mesafeyi güncelle
+  const handleGeocodeAddressOnForm = async () => {
+    setIsGeocodingFormAddress(true);
+    try {
+      const geo = await geocodeStreetAddressInDistrict(
+        addressDetail,
+        neighborhoodInput,
+        formDistrict
+      );
+      setBaseNeighborhoodLat(geo.lat);
+      setBaseNeighborhoodLng(geo.lng);
+      setSelectedLat(geo.lat);
+      setSelectedLng(geo.lng);
+      if (geo.matchedNeighborhood) {
+        setNeighborhoodInput(geo.matchedNeighborhood);
+        const matched = resolveTkgmMahalle(
+          geo.district,
+          geo.matchedNeighborhood
+        );
+        if (matched) setSelectedTkgmMahalleId(matched.id);
+      }
+      setFocusParcelZoomTrigger((c) => c + 1);
+      setFormBannerMessage(
+        geo.foundExactStreet
+          ? `✓ Adres konumu haritada işaretlendi: ${geo.displayLabel}`
+          : `✓ [${geo.district} - ${geo.matchedNeighborhood}] mahalle konumu haritada işaretlendi. Tam bina noktası için sağdaki haritaya tıklayabilirsiniz.`
+      );
+      setTimeout(() => setFormBannerMessage(null), 4500);
+    } finally {
+      setIsGeocodingFormAddress(false);
+    }
+  };
 
   // Query TKGM Cadastral Boundary and zoom directly into the parcel on the map
   const handleQueryAndShowParcelOnMap = async (openInlinePreview = false) => {
@@ -1533,6 +1596,46 @@ export default function App() {
         deviceType: detectedDeviceType,
         createdAt: new Date().toISOString(),
       };
+    } else if (subjectType === "adres") {
+      const allUniqueNeighborhoods = getRecordUniqueNeighborhoods({
+        neighborhood: neighborhoodInput.trim(),
+      });
+      const combinedNeighborhoodDisplay =
+        allUniqueNeighborhoods.length > 0
+          ? allUniqueNeighborhoods.join(" / ")
+          : neighborhoodInput.trim();
+
+      newRecord = {
+        id: `kesif-${Date.now()}`,
+        esasNo: esasNo.trim(),
+        district: formDistrict,
+        neighborhood: combinedNeighborhoodDisplay,
+        subjectType: "adres",
+        tkgmMahalleId: selectedTkgmMahalleId,
+        addressDetail:
+          addressDetail.trim() ||
+          `${combinedNeighborhoodDisplay} Açık Adres Keşfi`,
+        bagimsizBolumNo: bagimsizBolumNo.trim() || undefined,
+        nitelik: nitelik.trim() || undefined,
+        lat: selectedLat,
+        lng: selectedLng,
+        date,
+        time,
+        caseType,
+        experts:
+          combinedExpertsText ||
+          "İnşaat Bilirkişisi + GMDÜ (Gayrimenkul Değerleme Uzmanı)",
+        notes: notes.trim(),
+        distanceKm,
+        durationMin,
+        routeGeometry: pickerGeometry,
+        corridor: selectedCorridor,
+        status: formStatus,
+        createdBy: finalCreator,
+        createdByTitle: userProfile.title,
+        deviceType: detectedDeviceType,
+        createdAt: new Date().toISOString(),
+      };
     } else {
       const cleanAda = adaNo.trim() || undefined;
       const cleanParsel = parselNo.trim() || undefined;
@@ -1595,23 +1698,43 @@ export default function App() {
           ? allUniqueNeighborhoods.join(" / ")
           : neighborhoodInput.trim();
 
+      // Eğer kullanıcı hiçbir Ada/Parsel girmeden sadece açık adres yazdıysa otomatik olarak adres bazlı keşif kaydet
+      const isEffectivelyAddressOnly =
+        finalParcelsList.length === 0 &&
+        !cleanParsel &&
+        Boolean(addressDetail.trim());
+
       newRecord = {
         id: `kesif-${Date.now()}`,
         esasNo: esasNo.trim(),
         district: formDistrict,
         neighborhood: combinedNeighborhoodDisplay,
-        subjectType: "tasinmaz",
+        subjectType: isEffectivelyAddressOnly ? "adres" : "tasinmaz",
         tkgmMahalleId: primaryParcel?.mahalleId || selectedTkgmMahalleId,
-        adaNo: primaryParcel?.adaNo || cleanAda,
-        parselNo: primaryParcel?.parselNo || cleanParsel,
+        adaNo: isEffectivelyAddressOnly
+          ? undefined
+          : primaryParcel?.adaNo || (cleanParsel ? cleanAda || "0" : undefined),
+        parselNo: isEffectivelyAddressOnly
+          ? undefined
+          : primaryParcel?.parselNo || cleanParsel,
         bagimsizBolumNo: primaryParcel?.bagimsizBolumNo || cleanBb,
         nitelik: primaryParcel?.nitelik || nitelik.trim() || undefined,
-        yuzolcumuM2:
-          totalMultiArea > 0 ? Number(totalMultiArea.toFixed(2)) : cleanArea,
-        paftaNo: primaryParcel?.paftaNo || paftaNo.trim() || undefined,
-        parcelPolygon: primaryParcel?.polygon || finalPolygon,
-        parcelSource,
-        parcels: finalParcelsList.length > 0 ? finalParcelsList : undefined,
+        yuzolcumuM2: isEffectivelyAddressOnly
+          ? undefined
+          : totalMultiArea > 0
+          ? Number(totalMultiArea.toFixed(2))
+          : cleanArea,
+        paftaNo: isEffectivelyAddressOnly
+          ? undefined
+          : primaryParcel?.paftaNo || paftaNo.trim() || undefined,
+        parcelPolygon: isEffectivelyAddressOnly
+          ? undefined
+          : primaryParcel?.polygon || finalPolygon,
+        parcelSource: isEffectivelyAddressOnly ? undefined : parcelSource,
+        parcels:
+          !isEffectivelyAddressOnly && finalParcelsList.length > 0
+            ? finalParcelsList
+            : undefined,
         addressDetail: addressDetail.trim() || undefined,
         lat: primaryParcel?.centerLat || selectedLat,
         lng: primaryParcel?.centerLng || selectedLng,
@@ -1663,6 +1786,8 @@ export default function App() {
     const summaryBadge =
       newRecord.subjectType === "arac"
         ? ` [🚗 Araç: ${newRecord.vehicleInfo?.plateNo}]`
+        : newRecord.subjectType === "adres"
+        ? ` [🏠 Adres: ${newRecord.addressDetail || "Açık Adres"}]`
         : newRecord.parcels && newRecord.parcels.length > 1
         ? ` [📐 ${newRecord.parcels.length} Parsel: ${newRecord.parcels
             .map((p) => `${p.adaNo}/${p.parselNo}`)
@@ -1691,6 +1816,8 @@ export default function App() {
     const parcelSummary =
       updatedRecord.subjectType === "arac"
         ? ` [🚗 Araç: ${updatedRecord.vehicleInfo?.plateNo || ""}]`
+        : updatedRecord.subjectType === "adres"
+        ? ` [🏠 Adres: ${updatedRecord.addressDetail || "Açık Adres"}]`
         : updatedRecord.parcels && updatedRecord.parcels.length > 0
         ? ` [📐 ${updatedRecord.parcels
             .map((p) => `${p.adaNo}/${p.parselNo}`)
@@ -1972,6 +2099,7 @@ export default function App() {
       const cMeta = getCaseTypeVisualMeta(rec.caseType);
       const vehicleLabel = formatVehicleLabel(rec);
       const adaParselLabel = formatAdaParselLabel(rec);
+      const addressLabel = formatAddressLabel(rec);
       const uniqueMahs = getRecordUniqueNeighborhoods(rec);
       const mahalleLabel =
         uniqueMahs.length > 1 ? uniqueMahs.join(" → ") : rec.neighborhood;
@@ -1985,6 +2113,8 @@ export default function App() {
         ? ` | 📐 ${adaParselLabel}${
             rec.yuzolcumuM2 ? ` (${formatAreaM2(rec.yuzolcumuM2)} m²)` : ""
           }`
+        : addressLabel
+        ? ` | 🏠 Adres: ${addressLabel}`
         : "";
       lines.push(
         `📍 *${idx + 1}. DURAK — Saat ${rec.time} | Dosya No: ${rec.esasNo}*`
@@ -2011,11 +2141,14 @@ export default function App() {
           ""
         ).trim();
         if (singleBb) {
-          lines.push(`   • *Bağımsız Bölüm No:* ${singleBb}`);
+          lines.push(`   • *Bağımsız Bölüm / Daire No:* ${singleBb}`);
         }
       }
       if (rec.addressDetail) {
-        lines.push(`   • *Mevkii / İnceleme Yeri:* ${rec.addressDetail}`);
+        lines.push(`   • *Açık Adres / İnceleme Yeri:* ${rec.addressDetail}`);
+      }
+      if (rec.subjectType === "adres" && rec.nitelik) {
+        lines.push(`   • *İncelenen Yerin Niteliği:* ${rec.nitelik}`);
       }
       lines.push(`   • *Keşif Türü:* ${cMeta.icon} ${rec.caseType}`);
       if (rec.experts) {
@@ -3083,7 +3216,19 @@ export default function App() {
                     </label>
                     <select
                       value={caseType}
-                      onChange={(e) => setCaseType(e.target.value)}
+                      onChange={(e) => {
+                        const nextCt = e.target.value;
+                        setCaseType(nextCt);
+                        if (
+                          nextCt === "Kira Tespiti ve Tahliye" &&
+                          subjectType === "tasinmaz" &&
+                          !parselNo.trim() &&
+                          formParcels.length === 0
+                        ) {
+                          setSubjectType("adres");
+                          setSelectedExpertIds(["insaat", "gmdu"]);
+                        }
+                      }}
                       className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs sm:text-sm text-slate-900 focus:border-emerald-600 focus:outline-none"
                     >
                       {CASE_TYPES.map((ct) => (
@@ -3248,17 +3393,17 @@ export default function App() {
                 </div>
 
                 {/* ==============================================================
-                    KEŞİF KONUSU SEÇİMİ: TAŞINMAZ (ÇOKLU ADA/PARSEL) VEYA ARAÇ (PLAKA / HASAR TESPİTİ)
+                    KEŞİF KONUSU SEÇİMİ: TAŞINMAZ (ADA/PARSEL), ADRES BAZLI (CADDE/SOKAK/DAİRE) VEYA ARAÇ (PLAKA / HASAR)
                    ============================================================== */}
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
                   <label className="block text-[11px] font-bold text-slate-700 mb-1.5">
-                    Keşif / İnceleme Konusu Seçimi:
+                    Keşif / İnceleme Konusu Seçimi (Parsel Bazlı, Adres Bazlı veya Araç):
                   </label>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                     <button
                       type="button"
                       onClick={() => setSubjectType("tasinmaz")}
-                      className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs font-bold transition-all ${
+                      className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs font-bold transition-all ${
                         subjectType === "tasinmaz"
                           ? "border-amber-600 bg-amber-50 text-amber-950 ring-2 ring-amber-500/20"
                           : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
@@ -3266,9 +3411,30 @@ export default function App() {
                     >
                       <Layers className="h-4 w-4 text-amber-600 shrink-0" />
                       <div>
-                        <div>📐 Taşınmaz Keşfi (Ada / Parsel)</div>
+                        <div>📐 Taşınmaz (Ada / Parsel)</div>
                         <div className="text-[10px] font-normal text-slate-500">
-                          Çoklu parsel ekleme & yakın parsel önerisi
+                          TKGM parsel sınırı & çoklu parsel
+                        </div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSubjectType("adres");
+                        setParcelPolygon([]);
+                      }}
+                      className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs font-bold transition-all ${
+                        subjectType === "adres"
+                          ? "border-teal-600 bg-teal-50 text-teal-950 ring-2 ring-teal-500/20"
+                          : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                      }`}
+                    >
+                      <Home className="h-4 w-4 text-teal-600 shrink-0" />
+                      <div>
+                        <div>🏠 Adres Bazlı Keşif</div>
+                        <div className="text-[10px] font-normal text-slate-500">
+                          Cadde, sokak, bina, daire & işyeri
                         </div>
                       </div>
                     </button>
@@ -3277,11 +3443,12 @@ export default function App() {
                       type="button"
                       onClick={() => {
                         setSubjectType("arac");
+                        setParcelPolygon([]);
                         if (!selectedExpertIds.includes("makine")) {
                           setSelectedExpertIds(["makine"]);
                         }
                       }}
-                      className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs font-bold transition-all ${
+                      className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs font-bold transition-all ${
                         subjectType === "arac"
                           ? "border-indigo-600 bg-indigo-50 text-indigo-950 ring-2 ring-indigo-500/20"
                           : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
@@ -3289,16 +3456,145 @@ export default function App() {
                     >
                       <Car className="h-4 w-4 text-indigo-600 shrink-0" />
                       <div>
-                        <div>🚗 Araç İncelemesi (Plaka & Hasar Tespiti)</div>
+                        <div>🚗 Araç İncelemesi</div>
                         <div className="text-[10px] font-normal text-slate-500">
-                          Delil tespiti, araç hasar ve değer kaybı incelemesi
+                          Plaka, hasar ve değer kaybı tespiti
                         </div>
                       </div>
                     </button>
                   </div>
                 </div>
 
-                {subjectType === "arac" ? (
+                {subjectType === "adres" ? (
+                  /* ==============================================================
+                     ADRES BAZLI KEŞİF PANELİ (CADDE / SOKAK / BİNA / DAİRE / İŞYERİ)
+                     ============================================================== */
+                  <div className="rounded-xl border border-teal-300 bg-teal-50/55 p-3.5 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <Home className="h-4 w-4 text-teal-700 shrink-0" />
+                        <span className="text-xs font-bold text-slate-900">
+                          🏠 Adres Bazlı Keşif Bilgileri (Cadde / Sokak / Bina / Daire)
+                        </span>
+                      </div>
+                      <span className="rounded bg-teal-700 px-2 py-0.5 text-[10px] font-bold text-white">
+                        Ada/Parsel Gerekmeden Açık Adres Keşfi
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-800 mb-1">
+                        Açık Adres (Cadde / Sokak / Bulvar / Bina-Site Adı / Dış Kapı No) *
+                      </label>
+                      <div className="flex flex-col gap-1.5 sm:flex-row">
+                        <input
+                          type="text"
+                          required={subjectType === "adres"}
+                          list="address-street-presets"
+                          value={addressDetail}
+                          onChange={(e) => setAddressDetail(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              handleGeocodeAddressOnForm();
+                            }
+                          }}
+                          placeholder="Örn: Sakarya Cad. Aydın Apt. No: 42 (veya Sanayi Sitesi B Blok No: 12)"
+                          className="w-full rounded-lg border border-teal-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-teal-600 focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleGeocodeAddressOnForm}
+                          disabled={isGeocodingFormAddress}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-teal-700 px-3 py-2 text-xs font-bold text-white hover:bg-teal-800 disabled:opacity-50 whitespace-nowrap shrink-0"
+                          title="Yazılan cadde/sokak adresini haritada bul ve Adliye mesafesini hesapla"
+                        >
+                          <Search className="h-3.5 w-3.5" />
+                          <span>
+                            {isGeocodingFormAddress
+                              ? "Haritada Aranıyor..."
+                              : "Adresi Haritada Bul"}
+                          </span>
+                        </button>
+                      </div>
+                      <datalist id="address-street-presets">
+                        {FATSA_STREET_PRESETS.map((st) => (
+                          <option key={st} value={st} />
+                        ))}
+                      </datalist>
+
+                      {/* Hızlı Cadde / Bulvar Seçim Butonları */}
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[10px] text-teal-900">
+                        <span className="font-semibold text-slate-500">
+                          Hızlı Cadde / Mevkii:
+                        </span>
+                        {FATSA_STREET_PRESETS.slice(0, 5).map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => setAddressDetail(preset)}
+                            className="rounded border border-teal-200 bg-white px-1.5 py-0.5 text-teal-900 hover:border-teal-500 hover:bg-teal-50"
+                          >
+                            {preset.replace(/^.*Mah\.\s*/, "")}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-800 mb-1">
+                          Kat / İç Kapı / Daire (Bağımsız Bölüm) No
+                        </label>
+                        <input
+                          type="text"
+                          value={bagimsizBolumNo}
+                          onChange={(e) => setBagimsizBolumNo(e.target.value)}
+                          placeholder="Örn: Kat: 3, Daire: 8 (veya Zemin Kat No: 2)"
+                          className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-mono font-bold text-teal-950 focus:border-teal-600 focus:outline-none"
+                        />
+                        <span className="mt-0.5 block text-[10px] text-slate-500">
+                          Keşif Ajandasında ve bilirkişi paylaşım metninde görünür
+                        </span>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-800 mb-1">
+                          İncelenen Yerin Niteliği / Türü
+                        </label>
+                        <input
+                          type="text"
+                          list="address-nitelik-presets"
+                          value={nitelik}
+                          onChange={(e) => setNitelik(e.target.value)}
+                          placeholder="Örn: Konut / Mesken (Daire), Dükkan / İşyeri..."
+                          className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 focus:border-teal-600 focus:outline-none"
+                        />
+                        <datalist id="address-nitelik-presets">
+                          {ADDRESS_NITELIK_PRESETS.map((an) => (
+                            <option key={an} value={an} />
+                          ))}
+                        </datalist>
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {ADDRESS_NITELIK_PRESETS.slice(0, 4).map((an) => (
+                            <button
+                              key={an}
+                              type="button"
+                              onClick={() => setNitelik(an)}
+                              className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-700 hover:border-teal-500 hover:text-teal-900"
+                            >
+                              {an}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-teal-200 bg-white/90 px-3 py-2 text-[11px] text-teal-950">
+                      💡 <strong>Pratik İpucu:</strong> Adres bazlı keşifte Ada/Parsel girmenize gerek yoktur. Sağdaki harita üzerinden binanın veya sokağın bulunduğu noktaya tıkladığınızda cadde/sokak adı ve Adliye mesafesi otomatik güncellenir.
+                    </div>
+                  </div>
+                ) : subjectType === "arac" ? (
                   /* ==============================================================
                      ARAÇ HASAR / DELİL TESPİTİ PANELİ (PLAKA, MARKA/MODEL, İNCELEME YERİ)
                      ============================================================== */
@@ -3883,6 +4179,14 @@ export default function App() {
                           <span className="ml-1.5 font-mono text-xs text-indigo-700">
                             (🚗 {vehiclePlateNo})
                           </span>
+                        ) : subjectType === "adres" ? (
+                          <span className="ml-1.5 font-sans text-xs font-semibold text-teal-800">
+                            (🏠 {addressDetail.trim() || "Adres Bazlı Keşif"}
+                            {bagimsizBolumNo.trim()
+                              ? ` · Daire/B.Bölüm: ${bagimsizBolumNo.trim()}`
+                              : ""}
+                            )
+                          </span>
                         ) : formParcels.length > 1 ? (
                           <span className="ml-1.5 font-mono text-xs text-amber-700">
                             ({formParcels.length} Parsel)
@@ -4163,6 +4467,8 @@ export default function App() {
                     <Plus className="h-4 w-4" />
                     {subjectType === "arac"
                       ? "Araç Tespit Keşfini Kaydet"
+                      : subjectType === "adres"
+                      ? "Adres Bazlı Keşfi Kaydet"
                       : formParcels.length > 1
                       ? `Keşfi & ${formParcels.length} Parseli Kaydet`
                       : "Keşfi & Parseli Kaydet"}
@@ -4179,11 +4485,15 @@ export default function App() {
                     <h2 className="text-xs sm:text-sm font-bold text-slate-900">
                       {subjectType === "arac"
                         ? `Araç İnceleme Konumu & Güzergah Haritası (${formDistrict})`
+                        : subjectType === "adres"
+                        ? `Adres Bazlı Keşif Konumu & Güzergah Haritası (${formDistrict})`
                         : `TKGM Taşınmaz Ada/Parsel Sınırı & Çoklu Parsel Haritası (${formDistrict})`}
                     </h2>
                     <p className="text-[11px] text-slate-500">
                       {subjectType === "arac"
                         ? "Aracın bulunduğu otopark/sanayi konumunu haritadan seçebilir veya inceleme yeri butonlarını kullanabilirsiniz"
+                        : subjectType === "adres"
+                        ? "Haritada binanın veya sokağın üzerine tıklayarak keşif adres noktasını doğrudan işaretleyebilirsiniz"
                         : "Dosyaya eklenen tüm parsellerin TKGM sınırları haritada birlikte çizilir"}
                     </p>
                   </div>
@@ -4192,7 +4502,7 @@ export default function App() {
                   </span>
                 </div>
 
-                {/* Selected Multi-Parcel or Vehicle Metadata Summary Strip above Map */}
+                {/* Selected Multi-Parcel, Address or Vehicle Metadata Summary Strip above Map */}
                 {subjectType === "arac" ? (
                   <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-indigo-200 bg-indigo-50/80 px-3 py-2 text-xs">
                     <div className="flex flex-wrap items-center gap-2">
@@ -4207,6 +4517,24 @@ export default function App() {
                       {vehicleInspectionPlace && (
                         <span className="text-indigo-800">
                           · {vehicleInspectionPlace}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ) : subjectType === "adres" ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-teal-200 bg-teal-50/80 px-3 py-2 text-xs">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded bg-teal-700 px-2 py-0.5 text-[11px] font-bold text-white">
+                        🏠 {addressDetail.trim() || "Açık Adres Bekleniyor"}
+                      </span>
+                      {bagimsizBolumNo.trim() && (
+                        <span className="font-mono font-bold text-teal-950">
+                          · Daire/B.Bölüm No: {bagimsizBolumNo.trim()}
+                        </span>
+                      )}
+                      {nitelik.trim() && (
+                        <span className="text-teal-800">
+                          · {nitelik.trim()}
                         </span>
                       )}
                     </div>
@@ -4470,6 +4798,7 @@ export default function App() {
                           const wf = weatherMap[rec.id];
                           const currentStatus: InspectionStatus = rec.status || "planlandi";
                           const adaParselText = formatAdaParselLabel(rec);
+                          const addressText = formatAddressLabel(rec);
                           const cMeta = getCaseTypeVisualMeta(rec.caseType);
 
                           return (
@@ -4553,7 +4882,7 @@ export default function App() {
                                   )}
                                 </div>
 
-                                {/* Ada / Parsel (Çoklu Parsel) veya Araç Plaka Info Box with Map Trigger */}
+                                {/* Ada / Parsel (Çoklu Parsel), Adres Bazlı veya Araç Plaka Info Box with Map Trigger */}
                                 {rec.subjectType === "arac" &&
                                 rec.vehicleInfo?.plateNo ? (
                                   <div className="flex flex-wrap items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50/90 px-2.5 py-1.5 text-xs">
@@ -4582,58 +4911,89 @@ export default function App() {
                                       Haritada Konumu Gör &rarr;
                                     </button>
                                   </div>
-                                ) : (
-                                  adaParselText && (
-                                    <div className="flex flex-col gap-1.5 rounded-lg border border-amber-200 bg-amber-50/90 px-2.5 py-1.5 text-xs">
-                                      <div className="flex flex-wrap items-center justify-between gap-2">
-                                        <div className="text-amber-950">
-                                          <span className="font-mono font-bold">
-                                            📐 {adaParselText}
+                                ) : adaParselText ? (
+                                  <div className="flex flex-col gap-1.5 rounded-lg border border-amber-200 bg-amber-50/90 px-2.5 py-1.5 text-xs">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <div className="text-amber-950">
+                                        <span className="font-mono font-bold">
+                                          📐 {adaParselText}
+                                        </span>
+                                        {rec.yuzolcumuM2 && (
+                                          <span className="font-mono text-amber-800 ml-1.5">
+                                            · {formatAreaM2(rec.yuzolcumuM2)} m²
                                           </span>
-                                          {rec.yuzolcumuM2 && (
-                                            <span className="font-mono text-amber-800 ml-1.5">
-                                              · {formatAreaM2(rec.yuzolcumuM2)} m²
-                                            </span>
-                                          )}
-                                          {rec.nitelik && (
-                                            <span className="text-amber-900 ml-1.5">
-                                              · {rec.nitelik}
-                                            </span>
-                                          )}
-                                        </div>
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            handleOpenParcelOnOverviewMap(rec)
-                                          }
-                                          className="rounded bg-amber-600 px-2 py-0.5 text-[11px] font-bold text-white hover:bg-amber-700 whitespace-nowrap"
-                                          title="Taşınmazı harita üzerinde sınırlarıyla (poligon) görüntüle"
-                                        >
-                                          Haritada Sınırı Gör &rarr;
-                                        </button>
+                                        )}
+                                        {rec.nitelik && (
+                                          <span className="text-amber-900 ml-1.5">
+                                            · {rec.nitelik}
+                                          </span>
+                                        )}
                                       </div>
-                                      {rec.parcels && rec.parcels.length > 1 && (
-                                        <div className="flex flex-wrap items-center gap-1 pt-1 border-t border-amber-200/70">
-                                          {rec.parcels.map((p, pIdx) => (
-                                            <span
-                                              key={p.id || pIdx}
-                                              className="rounded bg-white border border-amber-300 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-amber-950"
-                                            >
-                                              {pIdx + 1}. Parsel:{" "}
-                                              {p.neighborhood
-                                                ? `${p.neighborhood.replace(/\s+Mahallesi$/i, "")} `
-                                                : ""}
-                                              {p.adaNo}/{p.parselNo}
-                                              {p.bagimsizBolumNo
-                                                ? ` [B.Bölüm No: ${p.bagimsizBolumNo}]`
-                                                : ""}
-                                              {p.yuzolcumuM2
-                                                ? ` (${formatAreaM2(p.yuzolcumuM2)} m²)`
-                                                : ""}
-                                            </span>
-                                          ))}
-                                        </div>
-                                      )}
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleOpenParcelOnOverviewMap(rec)
+                                        }
+                                        className="rounded bg-amber-600 px-2 py-0.5 text-[11px] font-bold text-white hover:bg-amber-700 whitespace-nowrap"
+                                        title="Taşınmazı harita üzerinde sınırlarıyla (poligon) görüntüle"
+                                      >
+                                        Haritada Sınırı Gör &rarr;
+                                      </button>
+                                    </div>
+                                    {rec.parcels && rec.parcels.length > 1 && (
+                                      <div className="flex flex-wrap items-center gap-1 pt-1 border-t border-amber-200/70">
+                                        {rec.parcels.map((p, pIdx) => (
+                                          <span
+                                            key={p.id || pIdx}
+                                            className="rounded bg-white border border-amber-300 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-amber-950"
+                                          >
+                                            {pIdx + 1}. Parsel:{" "}
+                                            {p.neighborhood
+                                              ? `${p.neighborhood.replace(/\s+Mahallesi$/i, "")} `
+                                              : ""}
+                                            {p.adaNo}/{p.parselNo}
+                                            {p.bagimsizBolumNo
+                                              ? ` [B.Bölüm No: ${p.bagimsizBolumNo}]`
+                                              : ""}
+                                            {p.yuzolcumuM2
+                                              ? ` (${formatAreaM2(p.yuzolcumuM2)} m²)`
+                                              : ""}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  addressText && (
+                                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-teal-200 bg-teal-50/90 px-2.5 py-1.5 text-xs">
+                                      <div className="text-teal-950">
+                                        <span className="font-bold">
+                                          🏠 Adres:{" "}
+                                          {rec.addressDetail ||
+                                            "Açık Adres Keşfi"}
+                                        </span>
+                                        {rec.bagimsizBolumNo && (
+                                          <span className="font-mono font-bold text-teal-900 ml-1.5">
+                                            · Daire / B.Bölüm No:{" "}
+                                            {rec.bagimsizBolumNo}
+                                          </span>
+                                        )}
+                                        {rec.nitelik && (
+                                          <span className="text-teal-800 ml-1.5">
+                                            · {rec.nitelik}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleOpenParcelOnOverviewMap(rec)
+                                        }
+                                        className="rounded bg-teal-700 px-2 py-0.5 text-[11px] font-bold text-white hover:bg-teal-800 whitespace-nowrap"
+                                        title="Adres konumunu harita üzerinde görüntüle"
+                                      >
+                                        Haritada Konumu Gör &rarr;
+                                      </button>
                                     </div>
                                   )
                                 )}
@@ -5482,6 +5842,7 @@ export default function App() {
                   {shareRouteData.records.map((rec, idx) => {
                     const cMeta = getCaseTypeVisualMeta(rec.caseType);
                     const adaParselStr = formatAdaParselLabel(rec);
+                    const addressStr = formatAddressLabel(rec);
                     return (
                       <div
                         key={rec.id}
@@ -5520,6 +5881,11 @@ export default function App() {
                                 ? ` · ${formatAreaM2(rec.yuzolcumuM2)} m²`
                                 : ""}
                               )
+                            </span>
+                          )}
+                          {addressStr && (
+                            <span className="ml-1.5 text-teal-800">
+                              (🏠 {addressStr})
                             </span>
                           )}
                         </div>

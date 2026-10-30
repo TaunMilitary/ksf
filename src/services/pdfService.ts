@@ -7,6 +7,7 @@ import {
 } from "../types";
 import {
   formatAdaParselLabel,
+  formatAddressLabel,
   formatAreaM2,
   formatDateTR,
   formatLongDateTR,
@@ -226,7 +227,7 @@ export async function exportInspectionsToPdf(
       "Sıra",
       "Tarih / Saat",
       "Esas No",
-      "Konum & Parsel / Araç",
+      "Konum & Parsel / Adres / Araç",
       "Dava / Keşif Türü",
       "Mesafe / Süre",
       "Hava Tahmini",
@@ -287,6 +288,7 @@ export async function exportInspectionsToPdf(
 
         const vehicleLabel = formatVehicleLabel(rec);
         const adaParselLabel = formatAdaParselLabel(rec);
+        const addressLabel = formatAddressLabel(rec);
 
         if (vehicleLabel) {
           ctx.fillStyle = "#3730a3";
@@ -330,6 +332,30 @@ export async function exportInspectionsToPdf(
             ctx.fillStyle = "#64748b";
             ctx.font = "400 14px 'JetBrains Mono', monospace";
             ctx.fillText(`Pafta: ${rec.paftaNo}`, colX[3] + 14, y + 130);
+          }
+        } else if (addressLabel) {
+          ctx.fillStyle = "#0f766e";
+          ctx.font = "bold 16px 'Plus Jakarta Sans', sans-serif";
+          ctx.fillText(
+            `Adres: ${(rec.addressDetail || "Açık Adres Keşfi").trim()}`.slice(
+              0,
+              36
+            ),
+            colX[3] + 14,
+            y + 76
+          );
+          const addrSub = [
+            rec.bagimsizBolumNo
+              ? `Daire/B.Bölüm No: ${rec.bagimsizBolumNo}`
+              : "",
+            rec.nitelik || "",
+          ]
+            .filter(Boolean)
+            .join(" · ");
+          if (addrSub) {
+            ctx.fillStyle = "#334155";
+            ctx.font = "600 15px 'Plus Jakarta Sans', sans-serif";
+            ctx.fillText(addrSub.slice(0, 36), colX[3] + 14, y + 104);
           }
         } else {
           if (rec.addressDetail) {
