@@ -22,13 +22,25 @@ export const DISTRICTS: CourtDistrict[] = ["Fatsa", "Çamaş", "Çatalpınar"];
 
 export const CASE_TYPES: string[] = [
   "Ortaklığın Giderilmesi",
+  "Tapu Kaydında Düzeltim",
+  "Vesayet Satış",
+  "Kıymet Takdirine İtiraz",
+  "Tazminat (Hor Kullanım)",
+  "Kira Tespiti ve Tahliye",
+  "Delil Tespiti",
   "Kadastro Tespitine İtiraz",
   "Elatmanın Önlenmesi ve Kal",
-  "Kira Tespiti ve Tahliye",
-  "Geçit Hakkı Tesisi",
   "Ecrimisil ve Sınır Tespiti",
-  "Delil Tespiti",
+  "Geçit Hakkı Tesisi",
   "Kamulaştırma Bedel Tespiti",
+  "Kat Mülkiyeti Uyuşmazlığı",
+  "Tapu İptali ve Tescil",
+  "Muhdesatın Aidiyetinin Tespiti",
+  "Kiralananın Tahliyesi ve Alacak",
+  "Tereke Tespiti ve Değerleme",
+  "Zilyetliğin Korunması",
+  "Taşkın Yapı ve Temliken Tescil",
+  "Zarar ve Hasar Tazminatı",
 ];
 
 export interface CaseTypeVisualMeta {
@@ -50,6 +62,42 @@ export const CASE_TYPE_VISUALS: Record<string, CaseTypeVisualMeta> = {
     borderColor: "#b45309",
     badgeBg: "#fef3c7",
     badgeText: "#92400e",
+  },
+  "Tapu Kaydında Düzeltim": {
+    caseType: "Tapu Kaydında Düzeltim",
+    shortLabel: "Tapu Kayıt Düzeltim",
+    icon: "📜",
+    bgColor: "#2563eb", // Blue-600
+    borderColor: "#1d4ed8",
+    badgeBg: "#dbeafe",
+    badgeText: "#1e40af",
+  },
+  "Vesayet Satış": {
+    caseType: "Vesayet Satış",
+    shortLabel: "Vesayet Satış",
+    icon: "🏛️",
+    bgColor: "#9333ea", // Purple-600
+    borderColor: "#7e22ce",
+    badgeBg: "#f3e8ff",
+    badgeText: "#6b21a8",
+  },
+  "Kıymet Takdirine İtiraz": {
+    caseType: "Kıymet Takdirine İtiraz",
+    shortLabel: "Kıymet Takdiri",
+    icon: "💎",
+    bgColor: "#0891b2", // Cyan-600
+    borderColor: "#0e7490",
+    badgeBg: "#cffafe",
+    badgeText: "#155e75",
+  },
+  "Tazminat (Hor Kullanım)": {
+    caseType: "Tazminat (Hor Kullanım)",
+    shortLabel: "Hor Kullanım Tazminat",
+    icon: "🛠️",
+    bgColor: "#e11d48", // Rose-600
+    borderColor: "#be123c",
+    badgeBg: "#ffe4e6",
+    badgeText: "#9f1239",
   },
   "Kadastro Tespitine İtiraz": {
     caseType: "Kadastro Tespitine İtiraz",
@@ -114,6 +162,78 @@ export const CASE_TYPE_VISUALS: Record<string, CaseTypeVisualMeta> = {
     badgeBg: "#fee2e2",
     badgeText: "#991b1b",
   },
+  "Kat Mülkiyeti Uyuşmazlığı": {
+    caseType: "Kat Mülkiyeti Uyuşmazlığı",
+    shortLabel: "Kat Mülkiyeti",
+    icon: "🏢",
+    bgColor: "#0369a1", // Sky-700
+    borderColor: "#075985",
+    badgeBg: "#e0f2fe",
+    badgeText: "#0c4a6e",
+  },
+  "Tapu İptali ve Tescil": {
+    caseType: "Tapu İptali ve Tescil",
+    shortLabel: "Tapu İptal & Tescil",
+    icon: "📋",
+    bgColor: "#4338ca", // Indigo-700
+    borderColor: "#312e81",
+    badgeBg: "#e0e7ff",
+    badgeText: "#312e81",
+  },
+  "Muhdesatın Aidiyetinin Tespiti": {
+    caseType: "Muhdesatın Aidiyetinin Tespiti",
+    shortLabel: "Muhdesat Aidiyeti",
+    icon: "🌳",
+    bgColor: "#15803d", // Green-700
+    borderColor: "#166534",
+    badgeBg: "#dcfce7",
+    badgeText: "#14532d",
+  },
+  "Kiralananın Tahliyesi ve Alacak": {
+    caseType: "Kiralananın Tahliyesi ve Alacak",
+    shortLabel: "Tahliye & Alacak",
+    icon: "🔑",
+    bgColor: "#0f766e", // Teal-700
+    borderColor: "#115e59",
+    badgeBg: "#ccfbf1",
+    badgeText: "#134e4a",
+  },
+  "Tereke Tespiti ve Değerleme": {
+    caseType: "Tereke Tespiti ve Değerleme",
+    shortLabel: "Tereke Tespiti",
+    icon: "⚖️",
+    bgColor: "#6d28d9", // Violet-700
+    borderColor: "#5b21b6",
+    badgeBg: "#ede9fe",
+    badgeText: "#4c1d95",
+  },
+  "Zilyetliğin Korunması": {
+    caseType: "Zilyetliğin Korunması",
+    shortLabel: "Zilyetlik Koruma",
+    icon: "🌾",
+    bgColor: "#b45309", // Amber-700
+    borderColor: "#92400e",
+    badgeBg: "#fef3c7",
+    badgeText: "#78350f",
+  },
+  "Taşkın Yapı ve Temliken Tescil": {
+    caseType: "Taşkın Yapı ve Temliken Tescil",
+    shortLabel: "Taşkın Yapı",
+    icon: "🧱",
+    bgColor: "#c2410c", // Orange-700
+    borderColor: "#9a3412",
+    badgeBg: "#ffedd5",
+    badgeText: "#7c2d12",
+  },
+  "Zarar ve Hasar Tazminatı": {
+    caseType: "Zarar ve Hasar Tazminatı",
+    shortLabel: "Hasar Tazminatı",
+    icon: "⚠️",
+    bgColor: "#b91c1c", // Red-700
+    borderColor: "#991b1b",
+    badgeBg: "#fee2e2",
+    badgeText: "#7f1d1d",
+  },
 };
 
 export function getCaseTypeVisualMeta(caseType?: string): CaseTypeVisualMeta {
@@ -133,6 +253,26 @@ export function getCaseTypeVisualMeta(caseType?: string): CaseTypeVisualMeta {
   }
   const lower = caseType.toLocaleLowerCase("tr-TR");
   if (lower.includes("ortak")) return CASE_TYPE_VISUALS["Ortaklığın Giderilmesi"];
+  if (lower.includes("düzeltim") || lower.includes("duzeltim") || lower.includes("tashih"))
+    return CASE_TYPE_VISUALS["Tapu Kaydında Düzeltim"];
+  if (lower.includes("vesayet"))
+    return CASE_TYPE_VISUALS["Vesayet Satış"];
+  if (lower.includes("kıymet") || lower.includes("kiymet"))
+    return CASE_TYPE_VISUALS["Kıymet Takdirine İtiraz"];
+  if (lower.includes("hor kullan") || lower.includes("tazminat"))
+    return CASE_TYPE_VISUALS["Tazminat (Hor Kullanım)"];
+  if (lower.includes("kat mülkiyet") || lower.includes("kat mulkiyet"))
+    return CASE_TYPE_VISUALS["Kat Mülkiyeti Uyuşmazlığı"];
+  if (lower.includes("muhdesat"))
+    return CASE_TYPE_VISUALS["Muhdesatın Aidiyetinin Tespiti"];
+  if (lower.includes("tereke"))
+    return CASE_TYPE_VISUALS["Tereke Tespiti ve Değerleme"];
+  if (lower.includes("zilyet"))
+    return CASE_TYPE_VISUALS["Zilyetliğin Korunması"];
+  if (lower.includes("taşkın") || lower.includes("temliken"))
+    return CASE_TYPE_VISUALS["Taşkın Yapı ve Temliken Tescil"];
+  if (lower.includes("tapu iptal") || lower.includes("tescil"))
+    return CASE_TYPE_VISUALS["Tapu İptali ve Tescil"];
   if (lower.includes("kadastro") || lower.includes("tapu"))
     return CASE_TYPE_VISUALS["Kadastro Tespitine İtiraz"];
   if (lower.includes("elatma") || lower.includes("el atma") || lower.includes("kal"))

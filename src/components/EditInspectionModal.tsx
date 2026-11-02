@@ -46,6 +46,7 @@ import {
   formatAreaM2,
   geocodeStreetAddressInDistrict,
   getRecordUniqueNeighborhoods,
+  parsePastedParcelText,
   queryParcelBoundary,
 } from "../services/geoService";
 import { STATUS_LABELS } from "../services/pdfService";
@@ -90,6 +91,8 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
   const [tkgmMessage, setTkgmMessage] = useState<string | null>(null);
   const [nearbySuggestions, setNearbySuggestions] = useState<ParcelItem[]>([]);
   const [isLoadingNearby, setIsLoadingNearby] = useState(false);
+  const [pastedText, setPastedText] = useState("");
+  const [isExtractingPasted, setIsExtractingPasted] = useState(false);
 
   // Araç Bilgileri
   const [plateNo, setPlateNo] = useState("");
@@ -456,6 +459,105 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
     }
   };
 
+  // Kopyalanıp yapıştırılan yazıdan tespit edilen Mahalle, Ada ve Parselleri düzenleme penceresine otomatik ekle
+  const handleExtractFromPastedInModal = async () => {
+    if (!pastedText.trim()) return;
+    const parsed = parsePastedParcelText(pastedText, district, neighborhood);
+    if (parsed.parcels.length === 0) {
+      if (parsed.detectedNeighborhood) {
+        if (parsed.detectedDistrict) setDistrict(parsed.detectedDistrict);
+        setNeighborhood(parsed.detectedNeighborhood);
+        setTkgmMahalleId(parsed.detectedTkgmMahalleId);
+        setPastedText("");
+        setTkgmMessage(
+          `✓ Yapıştırılan metinden [${parsed.detectedDistrict || district}] ${parsed.detectedNeighborhood} tespit edildi.`
+        );
+      } else {
+        setTkgmMessage(
+          "Metinde ada ve parsel numarası tespit edilemedi. Örn: 'Saraytepe Mah. 101 ada 5 parsel' biçiminde yapıştırınız."
+        );
+      }
+      return;
+    }
+
+    setIsExtractingPasted(true);
+    setTkgmMessage(null);
+    try {
+      const addedList: ParcelItem[] = [];
+      for (const cand of parsed.parcels.slice(0, 25)) {
+        const res = await queryParcelBoundary({
+          district: cand.district,
+          neighborhood: cand.neighborhood,
+          tkgmMahalleId: cand.tkgmMahalleId,
+          baseLat: cand.baseLat,
+          baseLng: cand.baseLng,
+          adaNo: cand.adaNo,
+          parselNo: cand.parselNo,
+          keepExactCenter: false,
+        });
+        const finalMahName = res.mahalleAd
+          ? res.mahalleAd.toLocaleLowerCase("tr-TR").includes("mahalle")
+            ? res.mahalleAd
+            : `${res.mahalleAd} Mahallesi`
+          : cand.neighborhood;
+
+        addedList.push({
+          id: `${res.mahalleId || cand.tkgmMahalleId || cand.district}-${res.adaNo || cand.adaNo}-${res.parselNo || cand.parselNo}${cand.bagimsizBolumNo ? `-bb${cand.bagimsizBolumNo}` : ""}`,
+          mahalleId: res.mahalleId || cand.tkgmMahalleId,
+          neighborhood: finalMahName,
+          adaNo: res.adaNo || cand.adaNo,
+          parselNo: res.parselNo || cand.parselNo,
+          bagimsizBolumNo: cand.bagimsizBolumNo || undefined,
+          nitelik: res.nitelik || undefined,
+          yuzolcumuM2: res.areaM2,
+          paftaNo: res.paftaNo || undefined,
+          mevkii: res.mevkii || undefined,
+          centerLat: res.centerLat,
+          centerLng: res.centerLng,
+          polygon: res.polygon,
+          source: res.source,
+        });
+      }
+
+      if (addedList.length > 0) {
+        const merged = [...parcels];
+        for (const item of addedList) {
+          const idx = merged.findIndex(
+            (p) =>
+              (p.neighborhood || "") === (item.neighborhood || "") &&
+              p.adaNo === item.adaNo &&
+              p.parselNo === item.parselNo
+          );
+          if (idx >= 0) {
+            merged[idx] = item;
+          } else {
+            merged.push(item);
+          }
+        }
+        setParcels(merged);
+        setPastedText("");
+        const first = merged[0];
+        if (first?.centerLat && first?.centerLng) {
+          setLat(first.centerLat);
+          setLng(first.centerLng);
+          recalculateDistanceForCoords(
+            first.centerLat,
+            first.centerLng,
+            merged,
+            neighborhood
+          );
+        }
+        setTkgmMessage(
+          `✓ Yapıştırılan metinden ${addedList.length} adet parsel (${addedList
+            .map((a) => `${a.adaNo}/${a.parselNo}`)
+            .join(", ")}) otomatik tespit edilerek dosyaya eklendi.`
+        );
+      }
+    } finally {
+      setIsExtractingPasted(false);
+    }
+  };
+
   // Bilirkişi unvanını hızlı ekle/çıkar
   const handleToggleExpertInText = (fullTitle: string) => {
     const parts = expertsText
@@ -733,8 +835,15 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
                 Keşif Türü / Dava Konusu *
               </label>
               <select
-                value={caseType}
-                onChange={(e) => setCaseType(e.target.value)}
+                value={CASE_TYPES.includes(caseType) ? caseType : "__custom__"}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === "__custom__") {
+                    setCaseType("");
+                  } else {
+                    setCaseType(val);
+                  }
+                }}
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-emerald-600 focus:outline-none"
               >
                 {CASE_TYPES.map((ct) => (
@@ -742,10 +851,18 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
                     {ct}
                   </option>
                 ))}
-                {!CASE_TYPES.includes(caseType as any) && caseType && (
-                  <option value={caseType}>{caseType}</option>
-                )}
+                <option value="__custom__">+ Diğer / Özel Dava Türü Yaz...</option>
               </select>
+              {!CASE_TYPES.includes(caseType) && (
+                <input
+                  type="text"
+                  required
+                  value={caseType}
+                  onChange={(e) => setCaseType(e.target.value)}
+                  placeholder="Özel dava konusu yazın..."
+                  className="mt-1.5 w-full rounded-lg border border-emerald-400 bg-emerald-50/40 px-3 py-1.5 text-xs font-semibold text-slate-900 focus:border-emerald-600 focus:bg-white focus:outline-none"
+                />
+              )}
             </div>
 
             <div>
@@ -1071,8 +1188,42 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
 
                 {/* Yeni Parsel Ekleme Satırı */}
                 <div className="rounded-lg border border-emerald-300 bg-white p-3 space-y-2.5">
+                  <div className="rounded-lg border border-indigo-200 bg-indigo-50/70 p-2.5 space-y-1.5">
+                    <div className="text-[11px] font-bold text-indigo-950">
+                      📋 Kopyala - Yapıştır Metinden Mahalle, Ada ve Parsel Otomatik Ekle:
+                    </div>
+                    <div className="flex flex-col gap-1.5 sm:flex-row">
+                      <input
+                        type="text"
+                        value={pastedText}
+                        onChange={(e) => setPastedText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleExtractFromPastedInModal();
+                          }
+                        }}
+                        placeholder="Örn: Saraytepe Mah. 101 ada 1, 5 parsel ve Ilıca Mah. 137/13..."
+                        className="flex-1 rounded border border-indigo-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 focus:border-indigo-600 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleExtractFromPastedInModal}
+                        disabled={isExtractingPasted || !pastedText.trim()}
+                        className="inline-flex items-center justify-center gap-1 rounded bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-50 whitespace-nowrap"
+                      >
+                        <Sparkles className="h-3.5 w-3.5" />
+                        <span>
+                          {isExtractingPasted
+                            ? "TKGM'den Ekleniyor..."
+                            : "Tespit Et & Ekle"}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
                   <div className="text-xs font-bold text-emerald-950">
-                    + Dosyaya Yeni Parsel Ekle (TKGM Sınır & Yüzölçümü Otomatik
+                    + Manuel Yeni Parsel Ekle (TKGM Sınır & Yüzölçümü Otomatik
                     Çekilir)
                   </div>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-6 items-end">

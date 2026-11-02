@@ -96,6 +96,7 @@ import {
   geocodeStreetAddressInDistrict,
   getRecordUniqueNeighborhoods,
   NominatimSearchResult,
+  parsePastedParcelText,
   parseTkgmGeoJson,
   queryParcelBoundary,
   resolveNeighborhoodCoordinates,
@@ -410,6 +411,11 @@ export default function App() {
   const [isAddingBatchParcels, setIsAddingBatchParcels] =
     useState<boolean>(false);
 
+  // Kopyala - Yapıştır Metinden Otomatik Mahalle / Ada / Parsel Tespit & Ekleme State
+  const [pastedParcelText, setPastedParcelText] = useState<string>("");
+  const [isExtractingPastedParcels, setIsExtractingPastedParcels] =
+    useState<boolean>(false);
+
   // Araç Hasar / Delil Tespiti State
   const [vehiclePlateNo, setVehiclePlateNo] = useState<string>("");
   const [vehicleBrandModel, setVehicleBrandModel] = useState<string>("");
@@ -617,9 +623,12 @@ export default function App() {
       ];
 
       if (subjectType === "tasinmaz" && formParcels.length > 0) {
+        const effectiveNeigh = parselNo.trim()
+          ? neighborhoodInput
+          : formParcels[0]?.neighborhood || neighborhoodInput;
         const tempStops = extractRecordLocationStops({
           district: formDistrict,
-          neighborhood: neighborhoodInput,
+          neighborhood: effectiveNeigh,
           lat: selectedLat,
           lng: selectedLng,
           parcels: formParcels,
@@ -690,6 +699,8 @@ export default function App() {
     // Parsel numarası girilmeden TKGM sorgusu başlatma (Ada tek başına veya boşken sahte '1' parsel çekilmesini engeller)
     if (!cleanParsel) {
       setParcelPolygon([]);
+      setYuzolcumuInput("");
+      setPaftaNo("");
       setTkgmStatusMessage(null);
       return;
     }
@@ -995,6 +1006,7 @@ export default function App() {
         setParcelPolygon([]);
         setFormParcels([]);
         setBatchParselInput("");
+        setPastedParcelText("");
         setNearbyParcelSuggestions([]);
         setTkgmStatusMessage(null);
         setParcelSource("cadastre_computed");
@@ -1040,28 +1052,40 @@ export default function App() {
     );
   };
 
-  // Toplu parsel numarası girişi (Örn: "2, 3, 5, 8") -> Önceki parselleri koruyarak TKGM'den çekip çoklu parsel listesine ekler
+  // Toplu parsel numarası girişi (Örn: "2, 3, 5, 8" veya "101/2, 101/3") -> Önceki parselleri koruyarak TKGM'den çekip çoklu parsel listesine ekler
   const handleBatchAddParcelsByNumbers = async () => {
-    const rawNums = batchParselInput
-      .split(/[,;\s-]+/)
+    const rawTokens = batchParselInput
+      .split(/[,;\s]+/)
       .map((s) => s.trim())
-      .filter((s) => s.length > 0 && /^\d+$/.test(s));
-    if (rawNums.length === 0) return;
+      .filter((s) => s.length > 0);
+    if (rawTokens.length === 0) return;
+
+    const pairsToFetch: { ada: string; parsel: string }[] = [];
+    const defaultAda = adaNo.trim() || "0";
+
+    for (const tok of rawTokens) {
+      const slashM = tok.match(/^(\d+)\/(\d+)$/);
+      if (slashM) {
+        pairsToFetch.push({ ada: slashM[1], parsel: slashM[2] });
+      } else if (/^\d+$/.test(tok)) {
+        pairsToFetch.push({ ada: defaultAda, parsel: tok });
+      }
+    }
+    if (pairsToFetch.length === 0) return;
 
     setIsAddingBatchParcels(true);
-    const targetAda = adaNo.trim() || "0";
     const addedItems: ParcelItem[] = [];
 
     // Eğer kutuda yazılı 1. parsel henüz formParcels'te yoksa önce onu da koru
     const currentInputItem = buildCurrentInputParcelItem();
 
     try {
-      for (const pNum of rawNums.slice(0, 20)) {
+      for (const pair of pairsToFetch.slice(0, 20)) {
         const alreadyInList = formParcels.some(
           (p) =>
             (p.neighborhood || "") === neighborhoodInput &&
-            p.adaNo === targetAda &&
-            p.parselNo === pNum
+            p.adaNo === pair.ada &&
+            p.parselNo === pair.parsel
         );
         if (alreadyInList) continue;
 
@@ -1071,17 +1095,17 @@ export default function App() {
           tkgmMahalleId: selectedTkgmMahalleId,
           baseLat: baseNeighborhoodLat,
           baseLng: baseNeighborhoodLng,
-          adaNo: targetAda,
-          parselNo: pNum,
+          adaNo: pair.ada,
+          parselNo: pair.parsel,
           keepExactCenter: false,
         });
 
         addedItems.push({
-          id: `${selectedTkgmMahalleId || formDistrict}-${targetAda}-${pNum}`,
+          id: `${selectedTkgmMahalleId || formDistrict}-${pair.ada}-${pair.parsel}`,
           mahalleId: res.mahalleId || selectedTkgmMahalleId,
           neighborhood: neighborhoodInput,
-          adaNo: targetAda,
-          parselNo: pNum,
+          adaNo: pair.ada,
+          parselNo: pair.parsel,
           nitelik: res.nitelik || nitelik || undefined,
           yuzolcumuM2: res.areaM2,
           paftaNo: res.paftaNo || paftaNo || undefined,
@@ -1133,6 +1157,190 @@ export default function App() {
       }
     } finally {
       setIsAddingBatchParcels(false);
+    }
+  };
+
+  // Kopyalanıp yapıştırılan metnin canlı önizleme çözümlemesi (Mahalle, Ada, Parsel, Bağımsız Bölüm, Esas No)
+  const parsedPastePreview = useMemo(() => {
+    if (!pastedParcelText.trim()) return null;
+    return parsePastedParcelText(
+      pastedParcelText,
+      formDistrict,
+      neighborhoodInput
+    );
+  }, [pastedParcelText, formDistrict, neighborhoodInput]);
+
+  // Kopyalanıp yapıştırılan yazıdan tespit edilen Mahalle, Ada ve Parsel bilgilerini TKGM sınırlarıyla otomatik çekip dosyaya ekler
+  const handleExtractAndAddFromPastedText = async (customText?: string) => {
+    const rawToParse =
+      typeof customText === "string" ? customText : pastedParcelText;
+    if (!rawToParse.trim()) {
+      setFormBannerMessage(
+        "Lütfen önce mahalle, ada ve parsel bilgilerini içeren metni kutuya yapıştırınız."
+      );
+      setTimeout(() => setFormBannerMessage(null), 3500);
+      return;
+    }
+
+    const parsed = parsePastedParcelText(
+      rawToParse,
+      formDistrict,
+      neighborhoodInput
+    );
+
+    if (parsed.detectedEsasNo && !esasNo.trim()) {
+      setEsasNo(parsed.detectedEsasNo);
+    }
+    if (parsed.detectedBagimsizBolumNo && !bagimsizBolumNo.trim()) {
+      setBagimsizBolumNo(parsed.detectedBagimsizBolumNo);
+    }
+
+    // Eğer metinde sadece mahalle adı var ama ada/parsel yoksa mahalleyi otomatik seç
+    if (parsed.parcels.length === 0) {
+      if (parsed.detectedNeighborhood) {
+        const nextDist = parsed.detectedDistrict || formDistrict;
+        setFormDistrict(nextDist);
+        setNeighborhoodInput(parsed.detectedNeighborhood);
+        setSelectedTkgmMahalleId(parsed.detectedTkgmMahalleId);
+        const resolved = resolveNeighborhoodCoordinates(
+          parsed.detectedNeighborhood,
+          nextDist
+        );
+        if (resolved) {
+          setBaseNeighborhoodLat(resolved.lat);
+          setBaseNeighborhoodLng(resolved.lng);
+          setSelectedLat(resolved.lat);
+          setSelectedLng(resolved.lng);
+        }
+        setPastedParcelText("");
+        setFormBannerMessage(
+          `✓ Yapıştırılan metinden [${nextDist}] ${parsed.detectedNeighborhood} tespit edildi. Ada ve parsel numarasını ekleyebilirsiniz.`
+        );
+        setTimeout(() => setFormBannerMessage(null), 4500);
+      } else {
+        setFormBannerMessage(
+          "Yapıştırılan metinde ada ve parsel numarası tespit edilemedi. Örn: 'Saraytepe Mah. 101 ada 5 parsel' veya 'Ilıca 137/13' biçiminde yapıştırabilirsiniz."
+        );
+        setTimeout(() => setFormBannerMessage(null), 4500);
+      }
+      return;
+    }
+
+    setIsExtractingPastedParcels(true);
+    setSubjectType("tasinmaz");
+    const currentInputItem = buildCurrentInputParcelItem();
+    const fetchedItems: ParcelItem[] = [];
+
+    try {
+      for (const cand of parsed.parcels.slice(0, 25)) {
+        const res = await queryParcelBoundary({
+          district: cand.district,
+          neighborhood: cand.neighborhood,
+          tkgmMahalleId: cand.tkgmMahalleId,
+          baseLat: cand.baseLat,
+          baseLng: cand.baseLng,
+          adaNo: cand.adaNo,
+          parselNo: cand.parselNo,
+          keepExactCenter: false,
+        });
+
+        const finalMahalleName = res.mahalleAd
+          ? res.mahalleAd.toLocaleLowerCase("tr-TR").includes("mahalle")
+            ? res.mahalleAd
+            : `${res.mahalleAd} Mahallesi`
+          : cand.neighborhood;
+
+        fetchedItems.push({
+          id: `${res.mahalleId || cand.tkgmMahalleId || cand.district}-${res.adaNo || cand.adaNo}-${res.parselNo || cand.parselNo}${cand.bagimsizBolumNo ? `-bb${cand.bagimsizBolumNo}` : ""}`,
+          mahalleId: res.mahalleId || cand.tkgmMahalleId,
+          neighborhood: finalMahalleName,
+          adaNo: res.adaNo || cand.adaNo,
+          parselNo: res.parselNo || cand.parselNo,
+          bagimsizBolumNo: cand.bagimsizBolumNo || undefined,
+          nitelik: res.nitelik || nitelik || undefined,
+          yuzolcumuM2: res.areaM2,
+          paftaNo: res.paftaNo || undefined,
+          mevkii: res.mevkii || undefined,
+          centerLat: res.centerLat,
+          centerLng: res.centerLng,
+          polygon: res.polygon,
+          source: res.source,
+        });
+      }
+
+      if (fetchedItems.length > 0) {
+        const first = fetchedItems[0];
+        const firstCand = parsed.parcels[0];
+        setFormDistrict(firstCand.district);
+        setNeighborhoodInput(first.neighborhood || firstCand.neighborhood);
+        setSelectedTkgmMahalleId(first.mahalleId || firstCand.tkgmMahalleId);
+        setBaseNeighborhoodLat(first.centerLat || firstCand.baseLat);
+        setBaseNeighborhoodLng(first.centerLng || firstCand.baseLng);
+        setSelectedLat(first.centerLat || firstCand.baseLat);
+        setSelectedLng(first.centerLng || firstCand.baseLng);
+        setSelectedCorridor(firstCand.corridor);
+
+        setFormParcels((prev) => {
+          const next = [...prev];
+          if (
+            currentInputItem &&
+            !next.some(
+              (p) =>
+                (p.neighborhood || "") ===
+                  (currentInputItem.neighborhood || "") &&
+                p.adaNo === currentInputItem.adaNo &&
+                p.parselNo === currentInputItem.parselNo
+            )
+          ) {
+            next.push(currentInputItem);
+          }
+          for (const item of fetchedItems) {
+            const existingIdx = next.findIndex(
+              (p) =>
+                (p.neighborhood || "") === (item.neighborhood || "") &&
+                p.adaNo === item.adaNo &&
+                p.parselNo === item.parselNo
+            );
+            if (existingIdx >= 0) {
+              next[existingIdx] = item;
+            } else {
+              next.push(item);
+            }
+          }
+          return next;
+        });
+
+        // Tekil parsel kutularını temizle ki formParcels listesiyle mükerrerlik oluşmasın, Ada No kutusunda son ada kalsın
+        setAdaNo(fetchedItems[fetchedItems.length - 1].adaNo);
+        setParselNo("");
+        setYuzolcumuInput("");
+        setPaftaNo("");
+        if (first.nitelik && !nitelik.trim()) {
+          setNitelik(first.nitelik);
+        }
+        if (first.polygon && first.polygon.length >= 3) {
+          setParcelPolygon(first.polygon);
+        }
+        setPastedParcelText("");
+        setFocusParcelZoomTrigger((c) => c + 1);
+
+        const summaryList = fetchedItems
+          .map(
+            (i) =>
+              `${i.neighborhood ? i.neighborhood.replace(" Mahallesi", " Mah.") + " " : ""}${i.adaNo}/${i.parselNo}${i.bagimsizBolumNo ? ` (BB:${i.bagimsizBolumNo})` : ""}`
+          )
+          .join(", ");
+
+        setTkgmStatusMessage(
+          `✓ Yapıştırılan metinden ${fetchedItems.length} adet parsel (${summaryList}) otomatik tespit edilip TKGM sınırlarıyla dosyaya eklendi.`
+        );
+        setFormBannerMessage(
+          `✓ Kopyala-Yapıştır metninden ${fetchedItems.length} parsel (${summaryList}) otomatik tespit edildi ve keşif dosyasına eklendi.`
+        );
+        setTimeout(() => setFormBannerMessage(null), 5500);
+      }
+    } finally {
+      setIsExtractingPastedParcels(false);
     }
   };
 
@@ -1689,14 +1897,18 @@ export default function App() {
       );
 
       // Dosyada birden fazla mahalle varsa tüm mahalle adlarını birleştir (Örn: "Saraytepe Mahallesi / Ilıca Mahallesi")
+      const effectivePrimaryNeighborhood =
+        finalParcelsList.length > 0 && !cleanParsel
+          ? finalParcelsList[0]?.neighborhood || neighborhoodInput.trim()
+          : neighborhoodInput.trim();
       const allUniqueNeighborhoods = getRecordUniqueNeighborhoods({
-        neighborhood: neighborhoodInput.trim(),
+        neighborhood: effectivePrimaryNeighborhood,
         parcels: finalParcelsList,
       });
       const combinedNeighborhoodDisplay =
         allUniqueNeighborhoods.length > 0
           ? allUniqueNeighborhoods.join(" / ")
-          : neighborhoodInput.trim();
+          : effectivePrimaryNeighborhood;
 
       // Eğer kullanıcı hiçbir Ada/Parsel girmeden sadece açık adres yazdıysa otomatik olarak adres bazlı keşif kaydet
       const isEffectivelyAddressOnly =
@@ -3215,28 +3427,61 @@ export default function App() {
                       Keşif Türü / Dava Konusu *
                     </label>
                     <select
-                      value={caseType}
+                      value={CASE_TYPES.includes(caseType) ? caseType : "__custom__"}
                       onChange={(e) => {
                         const nextCt = e.target.value;
+                        if (nextCt === "__custom__") {
+                          setCaseType("");
+                          return;
+                        }
                         setCaseType(nextCt);
                         if (
-                          nextCt === "Kira Tespiti ve Tahliye" &&
+                          (nextCt === "Kira Tespiti ve Tahliye" ||
+                            nextCt === "Kiralananın Tahliyesi ve Alacak" ||
+                            nextCt === "Tazminat (Hor Kullanım)") &&
                           subjectType === "tasinmaz" &&
                           !parselNo.trim() &&
                           formParcels.length === 0
                         ) {
-                          setSubjectType("adres");
-                          setSelectedExpertIds(["insaat", "gmdu"]);
+                          if (nextCt !== "Tazminat (Hor Kullanım)") {
+                            setSubjectType("adres");
+                          }
+                          setSelectedExpertIds(
+                            nextCt === "Tazminat (Hor Kullanım)"
+                              ? ["insaat", "makine", "gmdu"]
+                              : ["insaat", "gmdu"]
+                          );
+                        } else if (nextCt === "Tapu Kaydında Düzeltim") {
+                          setSelectedExpertIds(["fen", "ziraat"]);
+                        } else if (
+                          nextCt === "Vesayet Satış" ||
+                          nextCt === "Kıymet Takdirine İtiraz" ||
+                          nextCt === "Ortaklığın Giderilmesi"
+                        ) {
+                          setSelectedExpertIds(["fen", "ziraat", "insaat", "gmdu"]);
                         }
                       }}
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs sm:text-sm text-slate-900 focus:border-emerald-600 focus:outline-none"
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs sm:text-sm font-medium text-slate-900 focus:border-emerald-600 focus:outline-none"
                     >
                       {CASE_TYPES.map((ct) => (
                         <option key={ct} value={ct}>
                           {ct}
                         </option>
                       ))}
+                      <option value="__custom__">
+                        + Diğer / Özel Dava Türü Yaz...
+                      </option>
                     </select>
+                    {!CASE_TYPES.includes(caseType) && (
+                      <input
+                        type="text"
+                        required
+                        value={caseType}
+                        onChange={(e) => setCaseType(e.target.value)}
+                        placeholder="Özel dava konusu yazın (Örn: Tapu Kaydında Düzeltim)..."
+                        className="mt-1.5 w-full rounded-lg border border-emerald-400 bg-emerald-50/40 px-3 py-1.5 text-xs sm:text-sm font-semibold text-slate-900 focus:border-emerald-600 focus:bg-white focus:outline-none"
+                      />
+                    )}
                   </div>
 
                   <div>
@@ -3801,6 +4046,122 @@ export default function App() {
                         {tkgmStatusMessage}
                       </div>
                     )}
+
+                    {/* ============================================================
+                        KOPYALA - YAPIŞTIR METİNDEN OTOMATİK MAHALLE, ADA VE PARSEL TESPİT & EKLEME ALANI
+                       ============================================================ */}
+                    <div className="rounded-xl border border-indigo-300 bg-indigo-50/75 p-3 space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <WandIcon className="h-4 w-4 text-indigo-700 shrink-0" />
+                          <span className="text-xs font-bold text-indigo-950">
+                            📋 Kopyala - Yapıştır Metinden Mahalle, Ada ve Parsel Otomatik Tespit & Ekle
+                          </span>
+                        </div>
+                        <span className="rounded bg-indigo-700 px-2 py-0.5 text-[10px] font-bold text-white">
+                          UYAP / Müzekkere / Tapu Metni Çözücü
+                        </span>
+                      </div>
+
+                      <p className="text-[11px] text-slate-600 leading-relaxed">
+                        UYAP tensip zaptı, dava dilekçesi veya tapu kaydından kopyaladığınız metni aşağıya yapıştırın; metindeki <strong>İlçe, Mahalle/Köy, Ada, Parsel, Bağımsız Bölüm</strong> ve <strong>Esas No</strong> bilgileri otomatik tespit edilerek TKGM sınırlarıyla dosyaya eklenir.
+                      </p>
+
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                        <textarea
+                          rows={2}
+                          value={pastedParcelText}
+                          onChange={(e) => setPastedParcelText(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (
+                              (e.ctrlKey || e.metaKey || !e.shiftKey) &&
+                              e.key === "Enter"
+                            ) {
+                              e.preventDefault();
+                              handleExtractAndAddFromPastedText();
+                            }
+                          }}
+                          placeholder="Örn: Fatsa İlçesi Saraytepe Mahallesi 101 Ada 1 ve 5 Parsel ile Ilıca Mahallesi 137/13..."
+                          className="flex-1 rounded-lg border border-indigo-300 bg-white px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:border-indigo-600 focus:outline-none"
+                        />
+                        <div className="flex sm:flex-col gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleExtractAndAddFromPastedText()}
+                            disabled={
+                              isExtractingPastedParcels ||
+                              !pastedParcelText.trim()
+                            }
+                            className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-indigo-700 disabled:opacity-50 transition-colors whitespace-nowrap"
+                          >
+                            <Sparkles className="h-3.5 w-3.5 shrink-0" />
+                            <span>
+                              {isExtractingPastedParcels
+                                ? "TKGM'den Ekleniyor..."
+                                : "Tespit Et & Otomatik Ekle"}
+                            </span>
+                          </button>
+                          {pastedParcelText.trim() && (
+                            <button
+                              type="button"
+                              onClick={() => setPastedParcelText("")}
+                              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-100"
+                            >
+                              Temizle
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Canlı Tespit Önizlemesi (Metin yapıştırıldığı anda bulunan Mahalle/Ada/Parselleri gösterir) */}
+                      {parsedPastePreview &&
+                        (parsedPastePreview.parcels.length > 0 ||
+                          parsedPastePreview.detectedNeighborhood ||
+                          parsedPastePreview.detectedEsasNo) && (
+                          <div className="rounded-lg border border-indigo-200 bg-white px-2.5 py-2 space-y-1.5">
+                            <div className="flex flex-wrap items-center justify-between gap-1 text-[11px]">
+                              <span className="font-bold text-indigo-950">
+                                🔍 Metinden Tespit Edilen Bilgiler (
+                                {parsedPastePreview.parcels.length} Parsel):
+                              </span>
+                              {parsedPastePreview.detectedEsasNo && (
+                                <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-slate-800">
+                                  Esas No: {parsedPastePreview.detectedEsasNo}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {parsedPastePreview.parcels.map((cand, idx) => (
+                                <span
+                                  key={`${cand.district}-${cand.neighborhood}-${cand.adaNo}-${cand.parselNo}-${idx}`}
+                                  className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-mono font-bold text-emerald-950"
+                                >
+                                  <span>📍</span>
+                                  <span>
+                                    [{cand.district}]{" "}
+                                    {cand.neighborhood.replace(
+                                      " Mahallesi",
+                                      " Mah."
+                                    )}{" "}
+                                    · {cand.adaNo} Ada / {cand.parselNo} Parsel
+                                    {cand.bagimsizBolumNo
+                                      ? ` (BB: ${cand.bagimsizBolumNo})`
+                                      : ""}
+                                  </span>
+                                </span>
+                              ))}
+                              {parsedPastePreview.parcels.length === 0 &&
+                                parsedPastePreview.detectedNeighborhood && (
+                                  <span className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-950">
+                                    📍 [{parsedPastePreview.detectedDistrict}]{" "}
+                                    {parsedPastePreview.detectedNeighborhood}{" "}
+                                    (Ada/Parsel bekleniyor)
+                                  </span>
+                                )}
+                            </div>
+                          </div>
+                        )}
+                    </div>
 
                     {/* Ada, Parsel, Bağımsız Bölüm No, Yüzölçümü (m²), Pafta */}
                     <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5">

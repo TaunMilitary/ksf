@@ -2,13 +2,26 @@ export type CourtDistrict = "Fatsa" | "Çamaş" | "Çatalpınar";
 
 export type InspectionType =
   | "Ortaklığın Giderilmesi"
+  | "Tapu Kaydında Düzeltim"
+  | "Vesayet Satış"
+  | "Kıymet Takdirine İtiraz"
+  | "Tazminat (Hor Kullanım)"
+  | "Kira Tespiti ve Tahliye"
+  | "Delil Tespiti"
   | "Kadastro Tespitine İtiraz"
   | "Elatmanın Önlenmesi ve Kal"
-  | "Kira Tespiti ve Tahliye"
-  | "Geçit Hakkı Tesisi"
   | "Ecrimisil ve Sınır Tespiti"
-  | "Delil Tespiti"
-  | "Kamulaştırma Bedel Tespiti";
+  | "Geçit Hakkı Tesisi"
+  | "Kamulaştırma Bedel Tespiti"
+  | "Kat Mülkiyeti Uyuşmazlığı"
+  | "Tapu İptali ve Tescil"
+  | "Muhdesatın Aidiyetinin Tespiti"
+  | "Kiralananın Tahliyesi ve Alacak"
+  | "Tereke Tespiti ve Değerleme"
+  | "Zilyetliğin Korunması"
+  | "Taşkın Yapı ve Temliken Tescil"
+  | "Zarar ve Hasar Tazminatı"
+  | (string & {});
 
 export type InspectionStatus =
   | "planlandi"

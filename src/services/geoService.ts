@@ -703,9 +703,10 @@ export function getRecordUniqueNeighborhoods(rec: {
 
   const addIfUnique = (rawName?: string) => {
     if (!rawName) return;
-    // Eğer tek bir metin içinde birden fazla mahalle yazılmışsa ("Saraytepe Mah., Ilıca Mah." veya "Evkaf / Dolunay") ayrıştır
+    // Eğer tek bir metin içinde birden fazla mahalle yazılmışsa ("Saraytepe Mah., Ilıca Mah." veya "Evkaf / Dolunay") ayrıştır.
+    // DİKKAT: "Kayaköy/Akçakese" veya "Geyikçeli Bld/Fatih" gibi resmi TKGM mahalle adlarındaki boşluksuz '/' karakterini bölme!
     const parts = rawName
-      .split(/[,;/+&]+|\s+-\s+|\s+ve\s+/i)
+      .split(/[,;+&]+|\s+\/\s+|\s+-\s+|\s+ve\s+/i)
       .map((s) => s.trim())
       .filter((s) => s.length >= 2);
 
@@ -1879,4 +1880,443 @@ export async function detectClientDeviceInfo(): Promise<{
     deviceType: "pc",
   };
 }
+
+export interface ParsedParcelCandidate {
+  district: CourtDistrict;
+  neighborhood: string;
+  tkgmMahalleId?: number;
+  baseLat: number;
+  baseLng: number;
+  corridor: string;
+  adaNo: string;
+  parselNo: string;
+  bagimsizBolumNo?: string;
+}
+
+export interface ParsedInspectionTextResult {
+  detectedEsasNo?: string;
+  detectedDistrict?: CourtDistrict;
+  detectedNeighborhood?: string;
+  detectedTkgmMahalleId?: number;
+  detectedBagimsizBolumNo?: string;
+  parcels: ParsedParcelCandidate[];
+}
+
+interface TextNeighborhoodAnchor {
+  index: number;
+  district: CourtDistrict;
+  neighborhood: string;
+  tkgmMahalleId?: number;
+  lat: number;
+  lng: number;
+  corridor: string;
+}
+
+const AMBIGUOUS_BARE_MAHALLE_KEYS = new Set([
+  "yeni",
+  "merkez",
+  "dere",
+  "guney",
+  "kulak",
+  "maden",
+  "fatih",
+  "kurtulus",
+  "sakarya",
+  "karsiyaka",
+]);
+
+/**
+ * Kopyalanıp yapıştırılan serbest metinden (UYAP, Tapu Kaydı, Tensip Zaptı, Müzekkere, Dilekçe vb.)
+ * İlçe, Mahalle/Köy, Ada, Parsel, Bağımsız Bölüm No ve Esas No bilgilerini otomatik tespit eder.
+ * Birden fazla mahalle ve birden fazla ada/parsel içeren metinleri sırasıyla çözümler.
+ */
+export function parsePastedParcelText(
+  rawText: string,
+  defaultDistrict: CourtDistrict = "Fatsa",
+  defaultNeighborhood: string = "Saraytepe Mahallesi"
+): ParsedInspectionTextResult {
+  const cleanedText = (rawText || "").trim();
+  if (!cleanedText) {
+    return { parcels: [] };
+  }
+
+  // 1. Esas No tespiti (Örn: "2026/145 E.", "2025/88 Esas")
+  let detectedEsasNo: string | undefined;
+  const esasRegex = /\b(20\d{2})\s*\/\s*(\d+)\s*(?:E\.?|Esas)\b/i;
+  const esasMatch = cleanedText.match(esasRegex);
+  if (esasMatch) {
+    detectedEsasNo = `${esasMatch[1]}/${esasMatch[2]} E.`;
+  }
+
+  // 2. Bağımsız Bölüm / Daire No tespiti
+  let globalBagimsizBolum: string | undefined;
+  const bbMatch =
+    cleanedText.match(
+      /(?:bağımsız\s*bölüm|bagimsiz\s*bolum|b\.?\s*bölüm|bb)\s*(?:no|numarası|:)?\s*[:.\-]?\s*(\d+[A-Za-z]?)/i
+    ) ||
+    cleanedText.match(
+      /(\d+[A-Za-z]?)\s*(?:nolu|numaralı|no'?lu)\s*bağımsız\s*bölüm/i
+    ) ||
+    cleanedText.match(/(?:iç\s*kapı|daire)\s*(?:no)?\s*[:.\-]?\s*(\d+[A-Za-z]?)/i);
+  if (bbMatch && bbMatch[1]) {
+    globalBagimsizBolum = bbMatch[1].trim();
+  }
+
+  // 3. Metin içindeki İlçe ipuçlarını bul (Fatsa, Çamaş, Çatalpınar)
+  let fallbackDistrict: CourtDistrict = defaultDistrict;
+  const lowerFull = cleanedText.toLocaleLowerCase("tr-TR");
+  if (lowerFull.includes("çamaş") || lowerFull.includes("camas")) {
+    fallbackDistrict = "Çamaş";
+  } else if (
+    lowerFull.includes("çatalpınar") ||
+    lowerFull.includes("catalpinar")
+  ) {
+    fallbackDistrict = "Çatalpınar";
+  } else if (lowerFull.includes("fatsa")) {
+    fallbackDistrict = "Fatsa";
+  }
+
+  const resolveAnchorMeta = (
+    rawMahName: string,
+    hintDistrict: CourtDistrict,
+    matchIndex: number
+  ): TextNeighborhoodAnchor | null => {
+    const resolvedCoord = resolveNeighborhoodCoordinates(
+      rawMahName,
+      hintDistrict
+    );
+    const tkgm = resolveTkgmMahalle(
+      resolvedCoord?.district || hintDistrict,
+      rawMahName
+    );
+    if (!resolvedCoord && !tkgm) return null;
+
+    const finalDistrict =
+      resolvedCoord?.district || tkgm?.district || hintDistrict;
+    const finalName =
+      resolvedCoord?.matchedName ||
+      (tkgm
+        ? tkgm.text.toLocaleLowerCase("tr-TR").includes("mahalle")
+          ? tkgm.text
+          : `${tkgm.text} Mahallesi`
+        : `${rawMahName.trim()} Mahallesi`);
+    const localN = FATSA_NEIGHBORHOODS.find(
+      (n) =>
+        n.district === finalDistrict &&
+        normalizeMahalleKey(n.name) === normalizeMahalleKey(finalName)
+    );
+
+    return {
+      index: matchIndex,
+      district: finalDistrict,
+      neighborhood: finalName,
+      tkgmMahalleId: tkgm?.id,
+      lat: resolvedCoord?.lat || localN?.lat || FATSA_COURTHOUSE.lat,
+      lng: resolvedCoord?.lng || localN?.lng || FATSA_COURTHOUSE.lng,
+      corridor: localN?.corridor || `${finalDistrict} Güzergahı`,
+    };
+  };
+
+  // 4. Metin içindeki tüm Mahalle / Köy geçişlerini konumlarıyla (index) bul
+  const anchors: TextNeighborhoodAnchor[] = [];
+  const addAnchorIfNotOverlapping = (anchor: TextNeighborhoodAnchor | null) => {
+    if (!anchor) return;
+    const existsClose = anchors.some(
+      (a) =>
+        Math.abs(a.index - anchor.index) < 12 &&
+        normalizeMahalleKey(a.neighborhood) ===
+          normalizeMahalleKey(anchor.neighborhood)
+    );
+    if (!existsClose) {
+      anchors.push(anchor);
+    }
+  };
+
+  // A) "Mahalle/Köy: Saraytepe" veya "Mahallesi : Ilıca" biçimi
+  const prefixMahRegex =
+    /(?:mahallesi|mahalle\s*\/\s*köy|mahalle|köyü|köy)\s*[:\-]\s*([A-ZÇĞİÖŞÜa-zçğıöşü.]+(?:\s+[A-ZÇĞİÖŞÜa-zçğıöşü.]+){0,2})/gi;
+  let pmMatch: RegExpExecArray | null;
+  while ((pmMatch = prefixMahRegex.exec(cleanedText)) !== null) {
+    const candidateName = pmMatch[1]
+      .replace(/\b(?:ada|parsel|ilçesi|ili)\b.*$/i, "")
+      .trim();
+    if (candidateName.length >= 2) {
+      addAnchorIfNotOverlapping(
+        resolveAnchorMeta(candidateName, fallbackDistrict, pmMatch.index)
+      );
+    }
+  }
+
+  // B) "<İsim> Mahallesi / Mah. / Mah / Köyü / Köy" biçimi
+  const suffixMahRegex =
+    /([A-ZÇĞİÖŞÜa-zçğıöşü./-]+(?:\s+[A-ZÇĞİÖŞÜa-zçğıöşü./-]+){0,2})\s+(?:Mahallesi|Mah\.|Mah\b|Köyü|Köy\b)/gi;
+  let smMatch: RegExpExecArray | null;
+  while ((smMatch = suffixMahRegex.exec(cleanedText)) !== null) {
+    // İsimden önce "Ordu İli Fatsa İlçesi" gibi kelimeler varsa temizle
+    const rawPhrase = smMatch[1]
+      .replace(
+        /^.*?\b(?:ili|ilçesi|ilcesi|fatsa|çamaş|camas|çatalpınar|catalpinar|ordu|ve|ile)\b\s*[,:-]?\s*/i,
+        ""
+      )
+      .trim();
+    if (rawPhrase.length >= 2) {
+      // Bu eşleşmenin hemen öncesinde ilçe adı geçiyor mu kontrol et
+      const lookbehind = cleanedText
+        .slice(Math.max(0, smMatch.index - 35), smMatch.index + smMatch[0].length)
+        .toLocaleLowerCase("tr-TR");
+      let localDist = fallbackDistrict;
+      if (lookbehind.includes("çamaş") || lookbehind.includes("camas")) {
+        localDist = "Çamaş";
+      } else if (
+        lookbehind.includes("çatalpınar") ||
+        lookbehind.includes("catalpinar")
+      ) {
+        localDist = "Çatalpınar";
+      } else if (lookbehind.includes("fatsa")) {
+        localDist = "Fatsa";
+      }
+      addAnchorIfNotOverlapping(
+        resolveAnchorMeta(rawPhrase, localDist, smMatch.index)
+      );
+    }
+  }
+
+  // C) "Mahallesi" kelimesi yazılmadan doğrudan bilinen mahalle adlarının geçmesi (Örn: "Saraytepe 101/1, Ilıca 137/13")
+  const knownPool: { name: string; district: CourtDistrict; key: string }[] = [];
+  for (const n of FATSA_NEIGHBORHOODS) {
+    const clean = n.name
+      .replace(/\s*\(.*?\)\s*/g, "")
+      .replace(/\s*Mahallesi$/i, "")
+      .trim();
+    const k = normalizeMahalleKey(clean);
+    if (k.length >= 3) {
+      knownPool.push({ name: clean, district: n.district, key: k });
+    }
+  }
+  for (const m of TKGM_MAHALLE_LIST) {
+    const k = normalizeMahalleKey(m.text);
+    if (k.length >= 3 && !knownPool.some((p) => p.key === k && p.district === m.district)) {
+      knownPool.push({ name: m.text, district: m.district, key: k });
+    }
+  }
+  // Uzun mahalle adlarına öncelik ver ("Yukarıbahçeler" -> "Bahçeler"den önce)
+  knownPool.sort((a, b) => b.name.length - a.name.length);
+
+  for (const item of knownPool) {
+    if (AMBIGUOUS_BARE_MAHALLE_KEYS.has(item.key)) continue;
+    const escaped = item.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const bareRegex = new RegExp(
+      `(?:^|[^A-ZÇĞİÖŞÜa-zçğıöşü])(${escaped})(?=[^A-ZÇĞİÖŞÜa-zçğıöşü]|$)`,
+      "gi"
+    );
+    let bm: RegExpExecArray | null;
+    while ((bm = bareRegex.exec(cleanedText)) !== null) {
+      const hitIdx = bm.index + (bm[0].length - bm[1].length);
+      addAnchorIfNotOverlapping(
+        resolveAnchorMeta(item.name, item.district, hitIdx)
+      );
+    }
+  }
+
+  anchors.sort((a, b) => a.index - b.index);
+
+  // Varsayılan (fallback) mahalle çapası
+  const defaultAnchor =
+    resolveAnchorMeta(defaultNeighborhood, fallbackDistrict, 0) || {
+      index: 0,
+      district: fallbackDistrict,
+      neighborhood: defaultNeighborhood,
+      tkgmMahalleId: resolveTkgmMahalle(fallbackDistrict, defaultNeighborhood)?.id,
+      lat: FATSA_COURTHOUSE.lat,
+      lng: FATSA_COURTHOUSE.lng,
+      corridor: `${fallbackDistrict} Güzergahı`,
+    };
+
+  const getAnchorForPosition = (pos: number): TextNeighborhoodAnchor => {
+    if (anchors.length === 0) return defaultAnchor;
+    // Kendinden önce gelen en yakın mahalleyi seç; eğer kendinden önce yoksa ilk mahalleyi seç
+    let chosen = anchors[0];
+    for (const a of anchors) {
+      if (a.index <= pos + 3) {
+        chosen = a;
+      } else {
+        break;
+      }
+    }
+    return chosen;
+  };
+
+  // 5. Ada ve Parsel eşleşmelerini çıkarmak için Esas No, Karar No ve Tarihleri maskele
+  let maskedText = cleanedText
+    // Esas / Karar numaraları (Örn: 2026/145 E., 2025/12 K.)
+    .replace(/\b20\d{2}\s*\/\s*\d+\s*(?:E\.?|K\.?|Esas|Karar|D\.?\s*İş)?\b/gi, (m) =>
+      " ".repeat(m.length)
+    )
+    // Tarihler (Örn: 14.05.2026 veya 14/05/2026)
+    .replace(/\b\d{1,2}[./]\d{1,2}[./]20\d{2}\b/g, (m) => " ".repeat(m.length))
+    // 3402 S.Y. 22/A veya 2/B gibi yasa maddeleri
+    .replace(/\b(?:22\s*\/\s*A|2\s*\/\s*B)\b/gi, (m) => " ".repeat(m.length));
+
+  const extractedRaw: {
+    pos: number;
+    adaNo: string;
+    parselNo: string;
+    bagimsizBolumNo?: string;
+  }[] = [];
+
+  const maskRange = (start: number, length: number) => {
+    maskedText =
+      maskedText.slice(0, start) +
+      " ".repeat(length) +
+      maskedText.slice(start + length);
+  };
+
+  const splitParcelListTokens = (rawListStr: string): string[] => {
+    return rawListStr
+      .split(/(?:,|;|\s+ve\s+|\s+ile\s+|\s*-\s*|\s+)/i)
+      .map((s) => s.replace(/[^\d]/g, "").trim())
+      .filter((s) => s.length > 0 && Number(s) > 0);
+  };
+
+  // KURAL 1: "<Ada> ada <Parsel1, Parsel2...> parsel(ler)" (Örn: "101 ada 1, 2 ve 5 parsel" veya "137 ada, 13 nolu parsel")
+  const patternAdaSuffixParsel =
+    /\b(\d+)\s*(?:nolu\s+|numaralı\s+|no'?lu\s+)?ada\b[\s,:-]*((?:\d+(?:\s*(?:,|;|-|\bve\b|\bile\b)\s*)?)+)\s*(?:nolu\s+|numaralı\s+|no'?lu\s+|sayılı\s+)?parsel(?:ler|de|in|i|e)?\b/gi;
+  let m1: RegExpExecArray | null;
+  while ((m1 = patternAdaSuffixParsel.exec(maskedText)) !== null) {
+    const ada = m1[1].trim();
+    const pTokens = splitParcelListTokens(m1[2]);
+    for (const p of pTokens) {
+      extractedRaw.push({
+        pos: m1.index,
+        adaNo: ada,
+        parselNo: p,
+        bagimsizBolumNo: globalBagimsizBolum,
+      });
+    }
+    maskRange(m1.index, m1[0].length);
+  }
+
+  // KURAL 2: "Ada (No): <Ada> [,] Parsel (No): <Parsel1, Parsel2...>" (UYAP / Tapu tablo formatı)
+  const patternPrefixAdaParsel =
+    /\bada\s*(?:no|numarası)?\s*[:.\-]?\s*(\d+)[\s,;/-]+parsel\s*(?:no|numarası)?\s*[:.\-]?\s*(\d+(?:\s*(?:,|;|-|\bve\b)\s*\d+)*)/gi;
+  let m2: RegExpExecArray | null;
+  while ((m2 = patternPrefixAdaParsel.exec(maskedText)) !== null) {
+    const ada = m2[1].trim();
+    const pTokens = splitParcelListTokens(m2[2]);
+    for (const p of pTokens) {
+      extractedRaw.push({
+        pos: m2.index,
+        adaNo: ada,
+        parselNo: p,
+        bagimsizBolumNo: globalBagimsizBolum,
+      });
+    }
+    maskRange(m2.index, m2[0].length);
+  }
+
+  // KURAL 3: Ters sıra "<Parsel> parsel <Ada> ada" veya "Parsel No: <Parsel> Ada No: <Ada>"
+  const patternReverseParselAda =
+    /\b(\d+)\s*(?:nolu\s+|numaralı\s+)?parsel\b[\s,:-]*(\d+)\s*(?:nolu\s+|numaralı\s+)?ada\b/gi;
+  let m3: RegExpExecArray | null;
+  while ((m3 = patternReverseParselAda.exec(maskedText)) !== null) {
+    extractedRaw.push({
+      pos: m3.index,
+      adaNo: m3[2].trim(),
+      parselNo: m3[1].trim(),
+      bagimsizBolumNo: globalBagimsizBolum,
+    });
+    maskRange(m3.index, m3[0].length);
+  }
+
+  // KURAL 4: Eğik çizgi formatı "<Ada>/<Parsel>" veya "<Ada>/<Parsel1>-<Parsel2>" (Örn: "137/13", "101/1, 101/2", "105/4-5")
+  const patternSlash = /\b(\d{1,5})\s*\/\s*(\d{1,5}(?:\s*-\s*\d{1,5})*)\b/g;
+  let m4: RegExpExecArray | null;
+  while ((m4 = patternSlash.exec(maskedText)) !== null) {
+    const ada = m4[1].trim();
+    const pTokens = splitParcelListTokens(m4[2]);
+    for (const p of pTokens) {
+      extractedRaw.push({
+        pos: m4.index,
+        adaNo: ada,
+        parselNo: p,
+        bagimsizBolumNo: globalBagimsizBolum,
+      });
+    }
+    maskRange(m4.index, m4[0].length);
+  }
+
+  // KURAL 5: Sadece Parsel (Adasız / Eski Kadastro 0 Ada: Örn: "412 parsel", "412 ve 415 parsel", "Parsel No: 412")
+  const patternParselOnlySuffix =
+    /\b((?:\d+(?:\s*(?:,|;|-|\bve\b|\bile\b)\s*)?)+)\s*(?:nolu\s+|numaralı\s+|no'?lu\s+|sayılı\s+)?parsel(?:ler|de|in|i|e)?\b/gi;
+  let m5: RegExpExecArray | null;
+  while ((m5 = patternParselOnlySuffix.exec(maskedText)) !== null) {
+    const pTokens = splitParcelListTokens(m5[1]);
+    for (const p of pTokens) {
+      extractedRaw.push({
+        pos: m5.index,
+        adaNo: "0",
+        parselNo: p,
+        bagimsizBolumNo: globalBagimsizBolum,
+      });
+    }
+    maskRange(m5.index, m5[0].length);
+  }
+
+  const patternParselOnlyPrefix =
+    /\bparsel\s*(?:no|numarası)?\s*[:.\-]?\s*(\d+(?:\s*(?:,|;|-|\bve\b)\s*\d+)*)/gi;
+  let m6: RegExpExecArray | null;
+  while ((m6 = patternParselOnlyPrefix.exec(maskedText)) !== null) {
+    const pTokens = splitParcelListTokens(m6[1]);
+    for (const p of pTokens) {
+      extractedRaw.push({
+        pos: m6.index,
+        adaNo: "0",
+        parselNo: p,
+        bagimsizBolumNo: globalBagimsizBolum,
+      });
+    }
+    maskRange(m6.index, m6[0].length);
+  }
+
+  // Pozisyona göre sırala ve mükerrerleri ayıkla
+  extractedRaw.sort((a, b) => a.pos - b.pos);
+
+  const uniqueParcels: ParsedParcelCandidate[] = [];
+  for (const raw of extractedRaw) {
+    const anchor = getAnchorForPosition(raw.pos);
+    const dup = uniqueParcels.some(
+      (u) =>
+        u.district === anchor.district &&
+        normalizeMahalleKey(u.neighborhood) ===
+          normalizeMahalleKey(anchor.neighborhood) &&
+        u.adaNo === raw.adaNo &&
+        u.parselNo === raw.parselNo
+    );
+    if (!dup) {
+      uniqueParcels.push({
+        district: anchor.district,
+        neighborhood: anchor.neighborhood,
+        tkgmMahalleId: anchor.tkgmMahalleId,
+        baseLat: anchor.lat,
+        baseLng: anchor.lng,
+        corridor: anchor.corridor,
+        adaNo: raw.adaNo,
+        parselNo: raw.parselNo,
+        bagimsizBolumNo: raw.bagimsizBolumNo,
+      });
+    }
+  }
+
+  const primaryAnchor = anchors[0] || (uniqueParcels.length > 0 ? defaultAnchor : undefined);
+
+  return {
+    detectedEsasNo,
+    detectedDistrict: primaryAnchor?.district,
+    detectedNeighborhood: primaryAnchor?.neighborhood,
+    detectedTkgmMahalleId: primaryAnchor?.tkgmMahalleId,
+    detectedBagimsizBolumNo: globalBagimsizBolum,
+    parcels: uniqueParcels,
+  };
+}
+
 
