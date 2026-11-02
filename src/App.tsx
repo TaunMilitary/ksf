@@ -44,6 +44,7 @@ import {
   KeyRound,
   Pencil,
   Home,
+  FileSpreadsheet,
 } from "lucide-react";
 import {
   ActiveTab,
@@ -63,6 +64,9 @@ import {
 import {
   ADDRESS_NITELIK_PRESETS,
   CASE_TYPES,
+  COURT_BAILIFF_PRESETS,
+  COURT_CLERK_PRESETS,
+  COURT_JUDGE_PRESETS,
   DEFAULT_APPS_SCRIPT_URL,
   DEFAULT_EXPERT_TITLES,
   DISTRICTS,
@@ -110,6 +114,7 @@ import {
 import { fetchWeatherForInspection } from "./services/weatherService";
 import {
   exportInspectionsToPdf,
+  exportMonthlyCompletedInspectionsToExcel,
   filterRecordsByPeriod,
   STATUS_LABELS,
 } from "./services/pdfService";
@@ -289,13 +294,35 @@ export default function App() {
   const [weatherMap, setWeatherMap] = useState<Record<string, WeatherForecast>>({});
   const [formWeather, setFormWeather] = useState<WeatherForecast | null>(null);
 
-  // 4. State: PDF Export Modal
+  // 4. State: PDF Export Modal & Aylık Excel Raporu Modal + Keşif Yapıldı Heyet Kayıt Modalı
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
   const [pdfPeriod, setPdfPeriod] = useState<PdfExportPeriod>("weekly");
   const [pdfReferenceDate, setPdfReferenceDate] = useState<string>(
     () => inspections[0]?.date || new Date().toISOString().split("T")[0]
   );
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+
+  // Keşif "Yapıldı" butonuna tıklandığında açılan Hakim / Katip / Mübaşir seçim & giriş penceresi state
+  const [completingInspection, setCompletingInspection] =
+    useState<InspectionRecord | null>(null);
+  const [completionJudgeInput, setCompletionJudgeInput] =
+    useState<string>("Kadir SAĞLAM");
+  const [completionClerkInput, setCompletionClerkInput] = useState<string>("");
+  const [completionBailiffInput, setCompletionBailiffInput] =
+    useState<string>("Ebru YILMAZ");
+  const [completionNoteInput, setCompletionNoteInput] = useState<string>("");
+
+  // Aylık Yapılan Keşifler Excel Raporu Modal State
+  const [isExcelModalOpen, setIsExcelModalOpen] = useState<boolean>(false);
+  const [excelYearMonth, setExcelYearMonth] = useState<string>(() => {
+    const firstCompleted = inspections.find((r) => r.status === "yapildi");
+    const refDate =
+      firstCompleted?.date ||
+      inspections[0]?.date ||
+      new Date().toISOString().split("T")[0];
+    return refDate.slice(0, 7);
+  });
+  const [excelOnlyCompleted, setExcelOnlyCompleted] = useState<boolean>(true);
 
   // Save records to localStorage
   useEffect(() => {
@@ -2046,11 +2073,72 @@ export default function App() {
     setTimeout(() => setFormBannerMessage(null), 5000);
   };
 
+  const handleOpenCompletionModal = (rec: InspectionRecord) => {
+    setCompletingInspection(rec);
+    setCompletionJudgeInput(
+      rec.judgeName?.trim() || COURT_JUDGE_PRESETS[0] || "Kadir SAĞLAM"
+    );
+    setCompletionClerkInput(
+      rec.clerkName?.trim() || COURT_CLERK_PRESETS[0] || "Mehmet AKIN"
+    );
+    setCompletionBailiffInput(
+      rec.bailiffName?.trim() || COURT_BAILIFF_PRESETS[0] || "Ebru YILMAZ"
+    );
+    setCompletionNoteInput(rec.statusNote || "");
+  };
+
+  const handleSaveCompletionStaff = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!completingInspection) return;
+    const cleanJudge = completionJudgeInput.trim() || undefined;
+    const cleanClerk = completionClerkInput.trim() || undefined;
+    const cleanBailiff = completionBailiffInput.trim() || undefined;
+    const cleanNote = completionNoteInput.trim() || undefined;
+
+    const updated = inspections.map((rec) => {
+      if (rec.id !== completingInspection.id) return rec;
+      return {
+        ...rec,
+        status: "yapildi" as InspectionStatus,
+        judgeName: cleanJudge,
+        clerkName: cleanClerk,
+        bailiffName: cleanBailiff,
+        statusNote: cleanNote,
+      };
+    });
+
+    setInspections(updated);
+    pushRecordsToCloudIfEnabled(updated);
+
+    const staffSummary = [
+      cleanJudge ? `Hakim: ${cleanJudge}` : "",
+      cleanClerk ? `Katip: ${cleanClerk}` : "",
+      cleanBailiff ? `Mübaşir: ${cleanBailiff}` : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+    setFormBannerMessage(
+      `✓ ${completingInspection.esasNo} sayılı dosya "Keşif Yapıldı" olarak kaydedildi.${
+        staffSummary ? ` [Katılan Heyet: ${staffSummary}]` : ""
+      }`
+    );
+    setTimeout(() => setFormBannerMessage(null), 5000);
+    setCompletingInspection(null);
+  };
+
   const handleUpdateInspectionStatus = (
     id: string,
     newStatus: InspectionStatus,
     newDate?: string
   ) => {
+    if (newStatus === "yapildi") {
+      const targetRec = inspections.find((r) => r.id === id);
+      if (targetRec) {
+        handleOpenCompletionModal(targetRec);
+        return;
+      }
+    }
     const updated = inspections.map((rec) => {
       if (rec.id !== id) return rec;
       return {
@@ -2103,6 +2191,26 @@ export default function App() {
     } finally {
       setIsGeneratingPdf(false);
     }
+  };
+
+  const handleRunExcelExport = (
+    customYearMonth?: string,
+    customOnlyCompleted?: boolean
+  ) => {
+    const targetYm = customYearMonth || excelYearMonth;
+    const targetOnlyCompleted =
+      typeof customOnlyCompleted === "boolean"
+        ? customOnlyCompleted
+        : excelOnlyCompleted;
+    const { fileName, count } = exportMonthlyCompletedInspectionsToExcel(
+      inspections,
+      targetYm,
+      targetOnlyCompleted
+    );
+    setFormBannerMessage(
+      `📊 ${fileName} (${count} dosya — Dosya No, Keşif Tarihi ve Katılan Personel listeli Excel tablosu) cihazınıza indirildi.`
+    );
+    setTimeout(() => setFormBannerMessage(null), 5000);
   };
 
   // Calculate OSRM multi-stop route when mapFilterDate changes
@@ -2258,6 +2366,35 @@ export default function App() {
   const pdfPreviewData = useMemo(() => {
     return filterRecordsByPeriod(inspections, pdfPeriod, pdfReferenceDate);
   }, [inspections, pdfPeriod, pdfReferenceDate]);
+
+  // Mevcut keşiflerin bulunduğu ayların listesi (YYYY-MM) ve seçili ayın Excel önizleme verisi
+  const availableYearMonths = useMemo(() => {
+    const set = new Set<string>();
+    const nowYm = new Date().toISOString().slice(0, 7);
+    set.add(nowYm);
+    for (const r of inspections) {
+      if (r.date && r.date.length >= 7) {
+        set.add(r.date.slice(0, 7));
+      }
+    }
+    return Array.from(set).sort().reverse();
+  }, [inspections]);
+
+  const excelPreviewRecords = useMemo(() => {
+    return [...inspections]
+      .filter((r) => {
+        if (!r.date.startsWith(excelYearMonth)) return false;
+        if (excelOnlyCompleted) {
+          return r.status === "yapildi";
+        }
+        return r.status !== "iptal_edildi";
+      })
+      .sort((a, b) => {
+        const d = a.date.localeCompare(b.date);
+        if (d !== 0) return d;
+        return a.time.localeCompare(b.time);
+      });
+  }, [inspections, excelYearMonth, excelOnlyCompleted]);
 
   // Günlük Güzergah Paylaşım Verisi (Çıkış Noktası, Duraklar, Varış Noktası, Dosya Numaraları ve Google Maps Çok Duraklı Rota Linki)
   const shareRouteData = useMemo(() => {
@@ -5021,6 +5158,15 @@ export default function App() {
                 {/* Right Action Buttons */}
                 <div className="flex flex-wrap items-center gap-2">
                   <button
+                    type="button"
+                    onClick={() => setIsExcelModalOpen(true)}
+                    className="flex items-center gap-1.5 rounded-lg border border-emerald-400 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-950 hover:bg-emerald-100 whitespace-nowrap shadow-2xs"
+                    title="Aylık yapılan keşifleri (Dosya No, Keşif Tarihi, Katılan Hakim, Katip ve Mübaşir isimleriyle) Excel (.xls) olarak indir"
+                  >
+                    <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-700" />
+                    <span>Aylık Excel Raporu</span>
+                  </button>
+                  <button
                     onClick={() => setIsPdfModalOpen(true)}
                     className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 whitespace-nowrap"
                   >
@@ -5240,6 +5386,39 @@ export default function App() {
                                         {rec.createdBy}
                                       </span>
                                     </p>
+                                  )}
+                                  {(currentStatus === "yapildi" ||
+                                    rec.judgeName ||
+                                    rec.clerkName ||
+                                    rec.bailiffName) && (
+                                    <div className="mt-1.5 inline-flex flex-wrap items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50/90 px-2.5 py-1.5 text-xs text-emerald-950">
+                                      <span className="inline-flex items-center gap-1 font-bold text-emerald-900">
+                                        <UserCheck className="h-3.5 w-3.5 text-emerald-700" />
+                                        <span>Keşfe Katılan Heyet:</span>
+                                      </span>
+                                      <span className="rounded bg-white border border-emerald-200 px-1.5 py-0.5 text-[11px]">
+                                        <strong>Hakim:</strong>{" "}
+                                        {rec.judgeName || "Belirtilmedi"}
+                                      </span>
+                                      <span className="rounded bg-white border border-emerald-200 px-1.5 py-0.5 text-[11px]">
+                                        <strong>Katip:</strong>{" "}
+                                        {rec.clerkName || "Belirtilmedi"}
+                                      </span>
+                                      <span className="rounded bg-white border border-emerald-200 px-1.5 py-0.5 text-[11px]">
+                                        <strong>Mübaşir:</strong>{" "}
+                                        {rec.bailiffName || "Belirtilmedi"}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleOpenCompletionModal(rec)
+                                        }
+                                        className="rounded bg-emerald-700 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-emerald-800"
+                                        title="Keşfe katılan Hakim, Katip ve Mübaşir bilgisini düzenle"
+                                      >
+                                        Heyeti Düzenle
+                                      </button>
+                                    </div>
                                   )}
                                 </div>
 
@@ -5476,6 +5655,10 @@ export default function App() {
             }}
             onShareDailyRoute={(d) => setShareRouteDate(d)}
             onEditRecord={(rec) => setEditingInspection(rec)}
+            onExportMonthlyExcel={(ym) => {
+              setExcelYearMonth(ym);
+              setIsExcelModalOpen(true);
+            }}
             onUpdateStatus={(id, st) => handleUpdateInspectionStatus(id, st)}
             onDeleteRecord={handleDeleteInspection}
           />
@@ -6030,6 +6213,13 @@ export default function App() {
           </div>
           <div className="flex items-center gap-4">
             <button
+              onClick={() => setIsExcelModalOpen(true)}
+              className="font-semibold text-emerald-700 hover:text-emerald-900 underline-offset-4 hover:underline"
+            >
+              Aylık Yapılan Keşifler Excel Raporu
+            </button>
+            <span aria-hidden="true">·</span>
+            <button
               onClick={() => setIsPdfModalOpen(true)}
               className="hover:text-slate-900 underline-offset-4 hover:underline"
             >
@@ -6414,6 +6604,414 @@ export default function App() {
           });
         }}
       />
+
+      {/* ====================================================================
+          KEŞİF YAPILDI — KATILAN HAKİM, KATİP VE MÜBAŞİR KAYIT MODALI
+         ==================================================================== */}
+      {completingInspection && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/65 p-3 sm:p-4 backdrop-blur-xs">
+          <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-900 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-900 px-5 py-3.5 text-white">
+              <div className="flex items-center gap-2.5">
+                <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
+                <div>
+                  <h2 className="text-sm sm:text-base font-bold">
+                    Keşif Yapıldı — Katılan Personel Bilgileri
+                  </h2>
+                  <p className="text-[11px] text-slate-300">
+                    {completingInspection.esasNo} · [{completingInspection.district}]{" "}
+                    {completingInspection.neighborhood} ({formatDateTR(completingInspection.date)}{" "}
+                    {completingInspection.time})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCompletingInspection(null)}
+                className="rounded-lg p-1 text-slate-300 hover:bg-slate-800 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCompletionStaff} className="p-5 space-y-4">
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-xs text-emerald-950">
+                Keşfe katılan <strong>Hakim</strong>, <strong>Katip</strong> ve{" "}
+                <strong>Mübaşir</strong> bilgisini aşağıdaki hazır seçeneklerden tıklayarak seçebilir veya kutucuklara elle manuel yazabilirsiniz. Bu bilgiler aylık Excel raporuna doğrudan aktarılır.
+              </div>
+
+              {/* 1. HAKİM SEÇİMİ VE MANUEL GİRİŞ */}
+              <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="text-xs font-bold text-slate-900">
+                    1. Keşfe Katılan Hakim *
+                  </label>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {COURT_JUDGE_PRESETS.map((judge) => {
+                      const isSelected = completionJudgeInput.trim() === judge;
+                      return (
+                        <button
+                          key={judge}
+                          type="button"
+                          onClick={() => setCompletionJudgeInput(judge)}
+                          className={`rounded-lg border px-2.5 py-1 text-xs font-bold transition-all ${
+                            isSelected
+                              ? "border-emerald-600 bg-emerald-600 text-white shadow-2xs"
+                              : "border-slate-300 bg-white text-slate-800 hover:border-emerald-500"
+                          }`}
+                        >
+                          {isSelected ? "✓ " : ""}
+                          {judge}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <input
+                  type="text"
+                  required
+                  value={completionJudgeInput}
+                  onChange={(e) => setCompletionJudgeInput(e.target.value)}
+                  placeholder="Hakim adını seçin veya elle yazın (Örn: Kadir SAĞLAM)..."
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs sm:text-sm font-semibold text-slate-900 focus:border-emerald-600 focus:outline-none"
+                />
+              </div>
+
+              {/* 2. KATİP SEÇİMİ VE MANUEL GİRİŞ */}
+              <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="text-xs font-bold text-slate-900">
+                    2. Keşfe Katılan Zabıt Katibi *
+                  </label>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {COURT_CLERK_PRESETS.map((clerk) => {
+                      const isSelected = completionClerkInput.trim() === clerk;
+                      return (
+                        <button
+                          key={clerk}
+                          type="button"
+                          onClick={() => setCompletionClerkInput(clerk)}
+                          className={`rounded-lg border px-2.5 py-1 text-xs font-bold transition-all ${
+                            isSelected
+                              ? "border-emerald-600 bg-emerald-600 text-white shadow-2xs"
+                              : "border-slate-300 bg-white text-slate-800 hover:border-emerald-500"
+                          }`}
+                        >
+                          {isSelected ? "✓ " : ""}
+                          {clerk}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <input
+                  type="text"
+                  required
+                  value={completionClerkInput}
+                  onChange={(e) => setCompletionClerkInput(e.target.value)}
+                  placeholder="Katip adını seçin veya elle yazın (Örn: Mehmet AKIN / Mahsuni BAŞBAYDAR)..."
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs sm:text-sm font-semibold text-slate-900 focus:border-emerald-600 focus:outline-none"
+                />
+              </div>
+
+              {/* 3. MÜBAŞİR SEÇİMİ VE MANUEL GİRİŞ */}
+              <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="text-xs font-bold text-slate-900">
+                    3. Keşfe Katılan Mübaşir *
+                  </label>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {COURT_BAILIFF_PRESETS.map((bailiff) => {
+                      const isSelected =
+                        completionBailiffInput.trim() === bailiff;
+                      return (
+                        <button
+                          key={bailiff}
+                          type="button"
+                          onClick={() => setCompletionBailiffInput(bailiff)}
+                          className={`rounded-lg border px-2.5 py-1 text-xs font-bold transition-all ${
+                            isSelected
+                              ? "border-emerald-600 bg-emerald-600 text-white shadow-2xs"
+                              : "border-slate-300 bg-white text-slate-800 hover:border-emerald-500"
+                          }`}
+                        >
+                          {isSelected ? "✓ " : ""}
+                          {bailiff}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <input
+                  type="text"
+                  required
+                  value={completionBailiffInput}
+                  onChange={(e) => setCompletionBailiffInput(e.target.value)}
+                  placeholder="Mübaşir adını seçin veya elle yazın (Örn: Ebru YILMAZ)..."
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs sm:text-sm font-semibold text-slate-900 focus:border-emerald-600 focus:outline-none"
+                />
+              </div>
+
+              {/* Opsiyonel Keşif İcra Notu */}
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">
+                  Keşif İcra Notu (İsteğe Bağlı)
+                </label>
+                <input
+                  type="text"
+                  value={completionNoteInput}
+                  onChange={(e) => setCompletionNoteInput(e.target.value)}
+                  placeholder="Örn: Keşif icra edildi, bilirkişi raporu bekleniyor..."
+                  className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-900 focus:border-emerald-600 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setCompletingInspection(null)}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2 text-xs font-bold text-white shadow-xs hover:bg-emerald-700"
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  <span>Keşif Yapıldı Olarak Kaydet</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ====================================================================
+          AYLIK YAPILAN KEŞİFLER EXCEL RAPORU MODALI
+         ==================================================================== */}
+      {isExcelModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/65 p-3 sm:p-4 backdrop-blur-xs">
+          <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-900 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-900 px-5 py-3.5 text-white shrink-0">
+              <div className="flex items-center gap-2.5">
+                <FileSpreadsheet className="h-5 w-5 text-emerald-400 shrink-0" />
+                <div>
+                  <h2 className="text-sm sm:text-base font-bold">
+                    Aylık Yapılan Keşifler Excel (.xls) Raporu
+                  </h2>
+                  <p className="text-[11px] text-slate-300">
+                    Dosya Numarası, Keşif Tarihi ve Keşfe Katılan Personellerin (Hakim, Katip, Mübaşir) İsim Listesi
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsExcelModalOpen(false)}
+                className="rounded-lg p-1 text-slate-300 hover:bg-slate-800 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+              {/* Ay Seçimi ve Kapsam Filtresi */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-12 items-end rounded-xl border border-slate-200 bg-slate-50 p-3.5">
+                <div className="sm:col-span-5">
+                  <label className="block text-xs font-bold text-slate-800 mb-1">
+                    1. Rapor Ayı Seçiniz (Yıl / Ay)
+                  </label>
+                  <input
+                    type="month"
+                    value={excelYearMonth}
+                    onChange={(e) => setExcelYearMonth(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs sm:text-sm font-mono font-bold text-slate-900 focus:border-emerald-600 focus:outline-none"
+                  />
+                </div>
+
+                <div className="sm:col-span-7">
+                  <label className="block text-xs font-bold text-slate-800 mb-1">
+                    2. Rapor Filtresi
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setExcelOnlyCompleted(true)}
+                      className={`rounded-lg border px-3 py-2 text-xs font-bold transition-all ${
+                        excelOnlyCompleted
+                          ? "border-emerald-600 bg-emerald-600 text-white"
+                          : "border-slate-300 bg-white text-slate-700 hover:border-slate-400"
+                      }`}
+                    >
+                      ✓ Sadece Yapılan Keşifler
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setExcelOnlyCompleted(false)}
+                      className={`rounded-lg border px-3 py-2 text-xs font-bold transition-all ${
+                        !excelOnlyCompleted
+                          ? "border-emerald-600 bg-emerald-600 text-white"
+                          : "border-slate-300 bg-white text-slate-700 hover:border-slate-400"
+                      }`}
+                    >
+                      Aydaki Tüm Keşifler
+                    </button>
+                  </div>
+                </div>
+
+                {availableYearMonths.length > 0 && (
+                  <div className="sm:col-span-12 pt-1 flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11px] font-semibold text-slate-500">
+                      Hızlı Ay Seçimi:
+                    </span>
+                    {availableYearMonths.slice(0, 8).map((ym) => {
+                      const [y, m] = ym.split("-").map(Number);
+                      const label = new Date(y, (m || 1) - 1, 1).toLocaleDateString(
+                        "tr-TR",
+                        { month: "long", year: "numeric" }
+                      );
+                      const completedInMonth = inspections.filter(
+                        (r) => r.date.startsWith(ym) && r.status === "yapildi"
+                      ).length;
+                      const totalInMonth = inspections.filter(
+                        (r) =>
+                          r.date.startsWith(ym) && r.status !== "iptal_edildi"
+                      ).length;
+                      return (
+                        <button
+                          key={ym}
+                          type="button"
+                          onClick={() => setExcelYearMonth(ym)}
+                          className={`rounded border px-2 py-0.5 text-[11px] font-semibold transition-colors ${
+                            excelYearMonth === ym
+                              ? "border-emerald-600 bg-emerald-100 text-emerald-950 font-bold"
+                              : "border-slate-200 bg-white text-slate-700 hover:border-emerald-400"
+                          }`}
+                        >
+                          {label} ({completedInMonth}/{totalInMonth} Yapıldı)
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Tablo Önizlemesi */}
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-xs font-bold text-slate-900">
+                    Excel Tablosu Önizlemesi ({excelPreviewRecords.length} Dosya)
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    Personel bilgisini değiştirmek için satırdaki{" "}
+                    <strong>&ldquo;Heyet Düzenle&rdquo;</strong> butonuna tıklayabilirsiniz.
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full border-collapse text-left text-xs">
+                    <thead>
+                      <tr className="bg-slate-900 text-white">
+                        <th className="border-b border-slate-700 px-2.5 py-2 font-bold">
+                          Sıra
+                        </th>
+                        <th className="border-b border-slate-700 px-3 py-2 font-bold">
+                          Dosya Numarası
+                        </th>
+                        <th className="border-b border-slate-700 px-3 py-2 font-bold">
+                          Keşif Tarihi
+                        </th>
+                        <th className="border-b border-slate-700 px-3 py-2 font-bold">
+                          Keşfe Katılan Hakim
+                        </th>
+                        <th className="border-b border-slate-700 px-3 py-2 font-bold">
+                          Keşfe Katılan Katip
+                        </th>
+                        <th className="border-b border-slate-700 px-3 py-2 font-bold">
+                          Keşfe Katılan Mübaşir
+                        </th>
+                        <th className="border-b border-slate-700 px-3 py-2 font-bold text-right">
+                          İşlem
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 bg-white">
+                      {excelPreviewRecords.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={7}
+                            className="px-4 py-8 text-center text-xs text-slate-500"
+                          >
+                            Seçilen ayda ({excelYearMonth}){" "}
+                            {excelOnlyCompleted
+                              ? '"Yapıldı" olarak işaretlenmiş keşif dosyası bulunamadı. Keşif kartlarındaki "Yapıldı" butonuna tıklayarak katılan personelleri kaydedebilirsiniz veya "Aydaki Tüm Keşifler" filtresine geçebilirsiniz.'
+                              : "kayıtlı keşif dosyası bulunamadı."}
+                          </td>
+                        </tr>
+                      ) : (
+                        excelPreviewRecords.map((rec, idx) => (
+                          <tr key={rec.id} className="hover:bg-slate-50">
+                            <td className="px-2.5 py-2 font-mono font-bold text-slate-700">
+                              {idx + 1}
+                            </td>
+                            <td className="px-3 py-2 font-mono font-bold text-slate-900">
+                              {rec.esasNo}
+                            </td>
+                            <td className="px-3 py-2 font-mono text-slate-800">
+                              {formatDateTR(rec.date)} · {rec.time}
+                            </td>
+                            <td className="px-3 py-2 font-semibold text-emerald-800">
+                              {rec.judgeName || "-"}
+                            </td>
+                            <td className="px-3 py-2 font-semibold text-blue-900">
+                              {rec.clerkName || "-"}
+                            </td>
+                            <td className="px-3 py-2 font-semibold text-amber-900">
+                              {rec.bailiffName || "-"}
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenCompletionModal(rec)}
+                                className="rounded border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-900 hover:bg-emerald-100 whitespace-nowrap"
+                              >
+                                Heyet Düzenle
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3.5 shrink-0">
+              <div className="text-xs text-slate-600">
+                Toplam <strong>{excelPreviewRecords.length}</strong> keşif kaydı Excel tablosuna aktarılacak.
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsExcelModalOpen(false)}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                >
+                  Kapat
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleRunExcelExport()}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2 text-xs font-bold text-white shadow-xs hover:bg-emerald-700"
+                >
+                  <FileSpreadsheet className="h-4 w-4" />
+                  <span>Excel (.xls) Olarak İndir</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ====================================================================
           VERİLMİŞ KEŞİFLERİ DÜZENLEME MODALI (TÜM DETAYLAR DEĞİŞTİRİLEBİLİR)

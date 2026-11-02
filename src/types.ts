@@ -119,7 +119,10 @@ export interface InspectionRecord {
   routeGeometry?: [number, number][]; // OSRM polyline koordinatları
   corridor?: string; // Güzergah bölgesi
   status?: InspectionStatus; // planlandi | yapildi | iptal_edildi | ertelendi
-  statusNote?: string; // Erteleme veya iptal gerekçesi
+  statusNote?: string; // Erteleme, iptal veya keşif icra notu
+  judgeName?: string; // Keşfe katılan Hakim (Örn: "Kadir SAĞLAM")
+  clerkName?: string; // Keşfe katılan Zabıt Katibi (Örn: "Mehmet AKIN", "Mahsuni BAŞBAYDAR")
+  bailiffName?: string; // Keşfe katılan Mübaşir (Örn: "Ebru YILMAZ")
   createdBy?: string; // Ayarlardaki kullanıcı adı + unvanı ve/veya bilgisayar/telefon adı
   createdByTitle?: CourtUserTitle | string; // Ekleyen kişinin unvanı
   deviceType?: "pc" | "mobile" | "tablet"; // Ekleyen cihaz türü

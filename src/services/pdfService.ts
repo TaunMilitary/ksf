@@ -402,7 +402,7 @@ export async function exportInspectionsToPdf(
           );
         }
 
-        // 8. Keşif Durumu
+        // 8. Keşif Durumu & Katılan Mahkeme Heyeti (Hakim / Katip / Mübaşir)
         const st: InspectionStatus = rec.status || "planlandi";
         const stLabel = STATUS_LABELS[st];
         const stColor =
@@ -415,8 +415,24 @@ export async function exportInspectionsToPdf(
             : "#1e293b";
         ctx.fillStyle = stColor;
         ctx.font = "bold 20px 'Plus Jakarta Sans', sans-serif";
-        ctx.fillText(stLabel, colX[7] + 14, y + 56);
-        if (rec.statusNote) {
+        ctx.fillText(stLabel, colX[7] + 14, y + 50);
+
+        const staffLines: string[] = [];
+        if (rec.judgeName) staffLines.push(`Hakim: ${rec.judgeName}`);
+        if (rec.clerkName) staffLines.push(`Katip: ${rec.clerkName}`);
+        if (rec.bailiffName) staffLines.push(`Mübaşir: ${rec.bailiffName}`);
+
+        if (staffLines.length > 0) {
+          ctx.fillStyle = "#065f46";
+          ctx.font = "600 13.5px 'Plus Jakarta Sans', sans-serif";
+          staffLines.forEach((sLine, sIdx) => {
+            ctx.fillText(
+              sLine.slice(0, 26),
+              colX[7] + 14,
+              y + 76 + sIdx * 22
+            );
+          });
+        } else if (rec.statusNote) {
           ctx.fillStyle = "#64748b";
           ctx.font = "400 15px 'Plus Jakarta Sans', sans-serif";
           ctx.fillText(rec.statusNote.slice(0, 22), colX[7] + 14, y + 84);
@@ -474,3 +490,218 @@ export async function exportInspectionsToPdf(
   doc.save(fileName);
   return fileName;
 }
+
+function escapeExcelHtml(str: string | undefined | null): string {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * Seçilen ay için yapılan keşiflerin Excel (.xls) rapor çıktısını oluşturur.
+ * Tabloda: Sıra No, Dosya Numarası (Esas No), Keşif Tarihi, Keşfe Katılan Hakim,
+ * Keşfe Katılan Katip, Keşfe Katılan Mübaşir, Keşfe Katılan Personeller (Toplu) ve yardımcı detaylar yer alır.
+ */
+export function exportMonthlyCompletedInspectionsToExcel(
+  records: InspectionRecord[],
+  yearMonth: string, // Örn: "2026-05"
+  onlyCompleted: boolean = true
+): { fileName: string; count: number } {
+  const [yStr, mStr] = yearMonth.split("-");
+  const yearNum = Number(yStr) || new Date().getFullYear();
+  const monthNum = Number(mStr) || new Date().getMonth() + 1;
+  const ymPrefix = `${yearNum}-${String(monthNum).padStart(2, "0")}`;
+
+  const monthObj = new Date(yearNum, monthNum - 1, 1);
+  const monthTitleTR = monthObj
+    .toLocaleDateString("tr-TR", {
+      month: "long",
+      year: "numeric",
+    })
+    .toLocaleUpperCase("tr-TR");
+
+  const filtered = [...records]
+    .filter((r) => {
+      if (!r.date.startsWith(ymPrefix)) return false;
+      if (onlyCompleted) {
+        return r.status === "yapildi";
+      }
+      return r.status !== "iptal_edildi";
+    })
+    .sort((a, b) => {
+      const d = a.date.localeCompare(b.date);
+      if (d !== 0) return d;
+      return a.time.localeCompare(b.time);
+    });
+
+  const rowsHtml = filtered
+    .map((rec, idx) => {
+      const judge = rec.judgeName?.trim() || "-";
+      const clerk = rec.clerkName?.trim() || "-";
+      const bailiff = rec.bailiffName?.trim() || "-";
+
+      const combinedStaffParts: string[] = [];
+      if (rec.judgeName?.trim()) {
+        combinedStaffParts.push(`Hakim: ${rec.judgeName.trim()}`);
+      }
+      if (rec.clerkName?.trim()) {
+        combinedStaffParts.push(`Katip: ${rec.clerkName.trim()}`);
+      }
+      if (rec.bailiffName?.trim()) {
+        combinedStaffParts.push(`Mübaşir: ${rec.bailiffName.trim()}`);
+      }
+      const combinedStaffText =
+        combinedStaffParts.length > 0
+          ? combinedStaffParts.join(" | ")
+          : "Belirtilmedi";
+
+      const adaParsel = formatAdaParselLabel(rec);
+      const vehicle = formatVehicleLabel(rec);
+      const address = formatAddressLabel(rec);
+      const subjectDetail = vehicle
+        ? `Araç: ${vehicle}`
+        : adaParsel
+        ? adaParsel
+        : address
+        ? `Adres: ${address}`
+        : rec.addressDetail || "-";
+
+      const statusText = STATUS_LABELS[rec.status || "planlandi"];
+      const bgStyle = idx % 2 === 0 ? "#ffffff" : "#f8fafc";
+
+      return `
+        <tr style="background-color: ${bgStyle};">
+          <td style="border: 1px solid #cbd5e1; padding: 7px 10px; text-align: center; font-weight: bold;">${
+            idx + 1
+          }</td>
+          <td style="border: 1px solid #cbd5e1; padding: 7px 10px; font-weight: bold; color: #0f172a; mso-number-format:'\\@';">${escapeExcelHtml(
+            rec.esasNo
+          )}</td>
+          <td style="border: 1px solid #cbd5e1; padding: 7px 10px; text-align: center; font-weight: bold; mso-number-format:'\\@';">${escapeExcelHtml(
+            formatDateTR(rec.date)
+          )}</td>
+          <td style="border: 1px solid #cbd5e1; padding: 7px 10px; text-align: center; mso-number-format:'\\@';">${escapeExcelHtml(
+            rec.time
+          )}</td>
+          <td style="border: 1px solid #cbd5e1; padding: 7px 10px; font-weight: bold; color: #065f46;">${escapeExcelHtml(
+            judge
+          )}</td>
+          <td style="border: 1px solid #cbd5e1; padding: 7px 10px; font-weight: bold; color: #1e3a8a;">${escapeExcelHtml(
+            clerk
+          )}</td>
+          <td style="border: 1px solid #cbd5e1; padding: 7px 10px; font-weight: bold; color: #7c2d12;">${escapeExcelHtml(
+            bailiff
+          )}</td>
+          <td style="border: 1px solid #cbd5e1; padding: 7px 10px; color: #0f172a;">${escapeExcelHtml(
+            combinedStaffText
+          )}</td>
+          <td style="border: 1px solid #cbd5e1; padding: 7px 10px;">${escapeExcelHtml(
+            `[${rec.district}] ${rec.neighborhood}`
+          )}</td>
+          <td style="border: 1px solid #cbd5e1; padding: 7px 10px; mso-number-format:'\\@';">${escapeExcelHtml(
+            subjectDetail
+          )}</td>
+          <td style="border: 1px solid #cbd5e1; padding: 7px 10px;">${escapeExcelHtml(
+            rec.caseType
+          )}</td>
+          <td style="border: 1px solid #cbd5e1; padding: 7px 10px; text-align: center; font-weight: bold; color: ${
+            rec.status === "yapildi" ? "#059669" : "#334155"
+          };">${escapeExcelHtml(statusText)}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  const emptyRowHtml =
+    filtered.length === 0
+      ? `<tr><td colspan="12" style="border: 1px solid #cbd5e1; padding: 18px; text-align: center; color: #64748b; font-weight: bold;">${escapeExcelHtml(
+          monthTitleTR
+        )} döneminde kriterlere uygun keşif kaydı bulunmamaktadır.</td></tr>`
+      : "";
+
+  const reportSubtitle = onlyCompleted
+    ? `${monthTitleTR} DÖNEMİ YAPILAN KEŞİFLER VE KEŞFE KATILAN PERSONEL LİSTESİ`
+    : `${monthTitleTR} DÖNEMİ TÜM KEŞİFLER VE KEŞFE KATILAN PERSONEL LİSTESİ`;
+
+  const excelHtml = `\uFEFF<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <meta charset="utf-8" />
+  <!--[if gte mso 9]>
+  <xml>
+    <x:ExcelWorkbook>
+      <x:ExcelWorksheets>
+        <x:ExcelWorksheet>
+          <x:Name>Aylik Kesif Raporu</x:Name>
+          <x:WorksheetOptions>
+            <x:DisplayGridlines/>
+          </x:WorksheetOptions>
+        </x:ExcelWorksheet>
+      </x:ExcelWorksheets>
+    </x:ExcelWorkbook>
+  </xml>
+  <![endif]-->
+</head>
+<body style="font-family: Calibri, Arial, sans-serif; font-size: 11pt;">
+  <table border="1" cellspacing="0" cellpadding="5" style="border-collapse: collapse; width: 100%;">
+    <thead>
+      <tr>
+        <th colspan="12" style="background-color: #0f172a; color: #ffffff; font-size: 14pt; font-weight: bold; padding: 12px; text-align: left;">
+          T.C. FATSA SULH HUKUK MAHKEMESİ KALEMİ — ${escapeExcelHtml(
+            reportSubtitle
+          )}
+        </th>
+      </tr>
+      <tr>
+        <th colspan="12" style="background-color: #f1f5f9; color: #334155; font-size: 10pt; font-weight: bold; padding: 8px; text-align: left;">
+          Toplam Keşif Sayısı: ${
+            filtered.length
+          } Dosya | Rapor Oluşturma Tarihi: ${new Date().toLocaleDateString(
+    "tr-TR"
+  )}
+        </th>
+      </tr>
+      <tr style="background-color: #059669; color: #ffffff; font-weight: bold;">
+        <th style="border: 1px solid #047857; padding: 9px 10px; width: 55px;">Sıra No</th>
+        <th style="border: 1px solid #047857; padding: 9px 10px; width: 135px;">Dosya Numarası</th>
+        <th style="border: 1px solid #047857; padding: 9px 10px; width: 115px;">Keşif Tarihi</th>
+        <th style="border: 1px solid #047857; padding: 9px 10px; width: 85px;">Keşif Saati</th>
+        <th style="border: 1px solid #047857; padding: 9px 10px; width: 170px;">Keşfe Katılan Hakim</th>
+        <th style="border: 1px solid #047857; padding: 9px 10px; width: 185px;">Keşfe Katılan Katip</th>
+        <th style="border: 1px solid #047857; padding: 9px 10px; width: 170px;">Keşfe Katılan Mübaşir</th>
+        <th style="border: 1px solid #047857; padding: 9px 10px; width: 320px;">Keşfe Katılan Personeller (Toplu)</th>
+        <th style="border: 1px solid #047857; padding: 9px 10px; width: 200px;">İlçe / Mahalle</th>
+        <th style="border: 1px solid #047857; padding: 9px 10px; width: 180px;">Ada / Parsel / Konu</th>
+        <th style="border: 1px solid #047857; padding: 9px 10px; width: 180px;">Dava Türü</th>
+        <th style="border: 1px solid #047857; padding: 9px 10px; width: 120px;">Durumu</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rowsHtml || emptyRowHtml}
+    </tbody>
+  </table>
+</body>
+</html>`;
+
+  const blob = new Blob([excelHtml], {
+    type: "application/vnd.ms-excel;charset=utf-8;",
+  });
+  const fileName = `Fatsa_SHM_Aylik_${
+    onlyCompleted ? "Yapilan_Kesifler" : "Tum_Kesifler"
+  }_${ymPrefix}.xls`;
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+
+  return { fileName, count: filtered.length };
+}
+

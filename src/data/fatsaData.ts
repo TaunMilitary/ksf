@@ -414,6 +414,16 @@ export const USER_TITLE_OPTIONS: UserTitleOption[] = [
   },
 ];
 
+// Keşif yapıldıktan sonra keşfe katılan personel (Hakim, Katip, Mübaşir) hazır seçim listesi
+export const COURT_JUDGE_PRESETS: string[] = ["Kadir SAĞLAM"];
+
+export const COURT_CLERK_PRESETS: string[] = [
+  "Mehmet AKIN",
+  "Mahsuni BAŞBAYDAR",
+];
+
+export const COURT_BAILIFF_PRESETS: string[] = ["Ebru YILMAZ"];
+
 // Ordu ili Fatsa, Çamaş ve Çatalpınar ilçeleri mahalle ve köy veri tabanı (TKGM MEGSİS koordinatlarıyla tam uyumlu)
 export const FATSA_NEIGHBORHOODS: FatsaNeighborhood[] = [
   // --- FATSA İLÇESİ MAHALLELERİ ---

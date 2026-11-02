@@ -14,6 +14,8 @@ import {
   CloudRain,
   CloudLightning,
   Snowflake,
+  FileSpreadsheet,
+  UserCheck,
 } from "lucide-react";
 import {
   InspectionRecord,
@@ -40,6 +42,7 @@ interface CalendarViewProps {
   onOpenOnMap: (date: string) => void;
   onShareDailyRoute?: (date: string) => void;
   onEditRecord?: (record: InspectionRecord) => void;
+  onExportMonthlyExcel?: (yearMonth: string) => void;
   onUpdateStatus: (id: string, status: InspectionStatus) => void;
   onDeleteRecord: (id: string) => void;
 }
@@ -92,6 +95,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   onOpenOnMap,
   onShareDailyRoute,
   onEditRecord,
+  onExportMonthlyExcel,
   onUpdateStatus,
   onDeleteRecord,
 }) => {
@@ -194,7 +198,22 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               Günlerin üzerine tıklayarak o günün keşif dosyalarını, hava durumunu ve güzergah paylaşımını inceleyin
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {onExportMonthlyExcel && (
+              <button
+                type="button"
+                onClick={() =>
+                  onExportMonthlyExcel(
+                    `${currentYear}-${String(currentMonth + 1).padStart(2, "0")}`
+                  )
+                }
+                className="flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-900 hover:bg-emerald-100 whitespace-nowrap"
+                title={`${MONTH_NAMES_TR[currentMonth]} ${currentYear} yapılan keşifler Excel raporunu aç`}
+              >
+                <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-700" />
+                <span>{MONTH_NAMES_TR[currentMonth]} Ayı Excel Raporu</span>
+              </button>
+            )}
             <button
               onClick={handlePrevMonth}
               className="rounded-lg border border-slate-200 p-2 text-slate-700 hover:bg-slate-50"
@@ -443,6 +462,41 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                             👤 Keşfi Ekleyen:
                           </span>{" "}
                           {rec.createdBy}
+                        </div>
+                      )}
+
+                      {(rec.judgeName || rec.clerkName || rec.bailiffName) && (
+                        <div className="mt-1.5 rounded border border-emerald-300 bg-emerald-50/90 px-2.5 py-1.5 text-[11px] text-emerald-950">
+                          <div className="flex items-center justify-between gap-1 font-bold text-emerald-900">
+                            <span className="inline-flex items-center gap-1">
+                              <UserCheck className="h-3 w-3 text-emerald-700" />
+                              <span>Keşfe Katılan Personel:</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => onUpdateStatus(rec.id, "yapildi")}
+                              className="text-[10px] font-bold text-emerald-800 underline hover:text-emerald-950"
+                            >
+                              Düzenle
+                            </button>
+                          </div>
+                          <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px]">
+                            {rec.judgeName && (
+                              <span>
+                                <strong>Hakim:</strong> {rec.judgeName}
+                              </span>
+                            )}
+                            {rec.clerkName && (
+                              <span>
+                                <strong>Katip:</strong> {rec.clerkName}
+                              </span>
+                            )}
+                            {rec.bailiffName && (
+                              <span>
+                                <strong>Mübaşir:</strong> {rec.bailiffName}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       )}
 

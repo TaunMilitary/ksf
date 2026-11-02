@@ -25,6 +25,9 @@ import {
 import {
   ADDRESS_NITELIK_PRESETS,
   CASE_TYPES,
+  COURT_BAILIFF_PRESETS,
+  COURT_CLERK_PRESETS,
+  COURT_JUDGE_PRESETS,
   DEFAULT_EXPERT_TITLES,
   DISTRICTS,
   EXPERT_PRESETS,
@@ -112,6 +115,10 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
   const [expertsText, setExpertsText] = useState("");
   const [notes, setNotes] = useState("");
   const [createdBy, setCreatedBy] = useState("");
+  // Keşfe Katılan Mahkeme Heyeti (Hakim, Katip, Mübaşir)
+  const [judgeName, setJudgeName] = useState("");
+  const [clerkName, setClerkName] = useState("");
+  const [bailiffName, setBailiffName] = useState("");
   const [lat, setLat] = useState<number>(FATSA_COURTHOUSE.lat);
   const [lng, setLng] = useState<number>(FATSA_COURTHOUSE.lng);
   const [distanceKm, setDistanceKm] = useState<number>(5);
@@ -198,6 +205,9 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
     setExpertsText(record.experts || "");
     setNotes(record.notes || "");
     setCreatedBy(record.createdBy || "");
+    setJudgeName(record.judgeName || "");
+    setClerkName(record.clerkName || "");
+    setBailiffName(record.bailiffName || "");
     setLat(record.lat || FATSA_COURTHOUSE.lat);
     setLng(record.lng || FATSA_COURTHOUSE.lng);
     setDistanceKm(record.distanceKm || 5);
@@ -653,6 +663,9 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
       time,
       caseType,
       status,
+      judgeName: judgeName.trim() || undefined,
+      clerkName: clerkName.trim() || undefined,
+      bailiffName: bailiffName.trim() || undefined,
       subjectType,
       addressDetail: addressDetail.trim() || undefined,
       experts: expertsText.trim(),
@@ -871,7 +884,13 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
               </label>
               <select
                 value={status}
-                onChange={(e) => setStatus(e.target.value as InspectionStatus)}
+                onChange={(e) => {
+                  const nextSt = e.target.value as InspectionStatus;
+                  setStatus(nextSt);
+                  if (nextSt === "yapildi" && !judgeName.trim()) {
+                    setJudgeName(COURT_JUDGE_PRESETS[0] || "Kadir SAĞLAM");
+                  }
+                }}
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-900 focus:border-emerald-600 focus:outline-none"
               >
                 {(Object.keys(STATUS_LABELS) as InspectionStatus[]).map(
@@ -882,6 +901,135 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
                   )
                 )}
               </select>
+            </div>
+          </div>
+
+          {/* 2.5 Satır: Keşfe Katılan Mahkeme Heyeti (Hakim, Katip, Mübaşir) */}
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3.5 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-950">
+                <UserCheck className="h-4 w-4 text-emerald-600" />
+                <span>
+                  Keşfe Katılan Mahkeme Heyeti (Hakim, Katip ve Mübaşir — Seçim Yapabilir veya Elle Yazabilirsiniz)
+                </span>
+              </div>
+              {(judgeName || clerkName || bailiffName) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setJudgeName("");
+                    setClerkName("");
+                    setBailiffName("");
+                  }}
+                  className="text-[11px] font-semibold text-slate-500 hover:text-red-600"
+                >
+                  Heyeti Temizle
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {/* Hakim */}
+              <div className="rounded-lg border border-emerald-200 bg-white p-2.5 space-y-1.5">
+                <label className="block text-[11px] font-bold text-slate-800">
+                  ⚖️ Keşfe Katılan Hakim
+                </label>
+                <div className="flex flex-wrap gap-1">
+                  {COURT_JUDGE_PRESETS.map((j) => {
+                    const active = judgeName.trim() === j;
+                    return (
+                      <button
+                        key={j}
+                        type="button"
+                        onClick={() => setJudgeName(j)}
+                        className={`rounded border px-2 py-0.5 text-[11px] font-bold transition-colors ${
+                          active
+                            ? "border-emerald-600 bg-emerald-600 text-white"
+                            : "border-slate-200 bg-slate-50 text-slate-700 hover:border-emerald-400"
+                        }`}
+                      >
+                        {active ? "✓ " : ""}
+                        {j}
+                      </button>
+                    );
+                  })}
+                </div>
+                <input
+                  type="text"
+                  value={judgeName}
+                  onChange={(e) => setJudgeName(e.target.value)}
+                  placeholder="Hakim adı seçin veya elle yazın..."
+                  className="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-900 focus:border-emerald-600 focus:outline-none"
+                />
+              </div>
+
+              {/* Zabıt Katibi */}
+              <div className="rounded-lg border border-emerald-200 bg-white p-2.5 space-y-1.5">
+                <label className="block text-[11px] font-bold text-slate-800">
+                  ⌨️ Keşfe Katılan Katip
+                </label>
+                <div className="flex flex-wrap gap-1">
+                  {COURT_CLERK_PRESETS.map((c) => {
+                    const active = clerkName.trim() === c;
+                    return (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => setClerkName(c)}
+                        className={`rounded border px-2 py-0.5 text-[11px] font-bold transition-colors ${
+                          active
+                            ? "border-emerald-600 bg-emerald-600 text-white"
+                            : "border-slate-200 bg-slate-50 text-slate-700 hover:border-emerald-400"
+                        }`}
+                      >
+                        {active ? "✓ " : ""}
+                        {c}
+                      </button>
+                    );
+                  })}
+                </div>
+                <input
+                  type="text"
+                  value={clerkName}
+                  onChange={(e) => setClerkName(e.target.value)}
+                  placeholder="Katip adı seçin veya elle yazın..."
+                  className="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-900 focus:border-emerald-600 focus:outline-none"
+                />
+              </div>
+
+              {/* Mübaşir */}
+              <div className="rounded-lg border border-emerald-200 bg-white p-2.5 space-y-1.5">
+                <label className="block text-[11px] font-bold text-slate-800">
+                  📣 Keşfe Katılan Mübaşir
+                </label>
+                <div className="flex flex-wrap gap-1">
+                  {COURT_BAILIFF_PRESETS.map((b) => {
+                    const active = bailiffName.trim() === b;
+                    return (
+                      <button
+                        key={b}
+                        type="button"
+                        onClick={() => setBailiffName(b)}
+                        className={`rounded border px-2 py-0.5 text-[11px] font-bold transition-colors ${
+                          active
+                            ? "border-emerald-600 bg-emerald-600 text-white"
+                            : "border-slate-200 bg-slate-50 text-slate-700 hover:border-emerald-400"
+                        }`}
+                      >
+                        {active ? "✓ " : ""}
+                        {b}
+                      </button>
+                    );
+                  })}
+                </div>
+                <input
+                  type="text"
+                  value={bailiffName}
+                  onChange={(e) => setBailiffName(e.target.value)}
+                  placeholder="Mübaşir adı seçin veya elle yazın..."
+                  className="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-900 focus:border-emerald-600 focus:outline-none"
+                />
+              </div>
             </div>
           </div>
 
