@@ -45,6 +45,7 @@ import {
   Pencil,
   Home,
   FileSpreadsheet,
+  FileText,
 } from "lucide-react";
 import {
   ActiveTab,
@@ -57,6 +58,7 @@ import {
   ParcelBoundarySource,
   ParcelItem,
   PdfExportPeriod,
+  RegisteredExpert,
   SmartSuggestion,
   UserProfileConfig,
   WeatherForecast,
@@ -126,12 +128,15 @@ import {
 } from "./components/CloudSyncModal";
 import { MultiRouteAdvisorView } from "./components/MultiRouteAdvisorView";
 import { EditInspectionModal } from "./components/EditInspectionModal";
+import { InspectionMinutesView } from "./components/InspectionMinutesView";
 import {
   GitHubPublishResult,
   publishProjectToGitHubPagesKsf,
 } from "./services/githubPagesPublisher";
 
 const STORAGE_KEY_RECORDS = "fatsa_adliyesi_kesif_kayitlari_v5";
+const STORAGE_KEY_REGISTERED_EXPERTS =
+  "fatsa_adliyesi_bilirkisi_listesi_v1";
 const LEGACY_RECORD_KEYS = [
   "fatsa_adliyesi_kesif_kayitlari_v4",
   "fatsa_adliyesi_kesif_kayitlari_v3",
@@ -323,6 +328,37 @@ export default function App() {
     return refDate.slice(0, 7);
   });
   const [excelOnlyCompleted, setExcelOnlyCompleted] = useState<boolean>(true);
+
+  // Mahkeme Bilirkişi Rehberi (Keşif Zaptı Hazırla için Unvan, Ad Soyad, Sicil No ve Açıklama listesi)
+  const [registeredExperts, setRegisteredExperts] = useState<
+    RegisteredExpert[]
+  >(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_REGISTERED_EXPERTS);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  });
+  const [preselectedMinutesRecordId, setPreselectedMinutesRecordId] = useState<
+    string | null
+  >(null);
+
+  const handleSaveRegisteredExperts = (nextExperts: RegisteredExpert[]) => {
+    setRegisteredExperts(nextExperts);
+    try {
+      localStorage.setItem(
+        STORAGE_KEY_REGISTERED_EXPERTS,
+        JSON.stringify(nextExperts)
+      );
+    } catch {
+      // ignore
+    }
+  };
 
   // Save records to localStorage
   useEffect(() => {
@@ -3029,7 +3065,7 @@ export default function App() {
         </div>
 
         {/* Zone 2: Desktop Navigation Links */}
-        <nav className="hidden md:flex items-center gap-5 text-sm font-medium text-slate-300">
+        <nav className="hidden md:flex items-center gap-3.5 lg:gap-4 text-xs lg:text-sm font-medium text-slate-300">
           <button
             onClick={() => setActiveTab("ajanda")}
             className={`py-1 transition-colors whitespace-nowrap shrink-0 ${
@@ -3073,6 +3109,29 @@ export default function App() {
           >
             Yeni Keşif Ekle
           </button>
+          {/* MOR MENÜ: Keşif Zaptı Hazırla */}
+          <button
+            onClick={() => setActiveTab("kesif_zapti")}
+            className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition-all whitespace-nowrap shrink-0 shadow-xs ${
+              activeTab === "kesif_zapti"
+                ? "border-purple-300 bg-purple-600 text-white ring-2 ring-purple-400/40"
+                : "border-purple-400/60 bg-purple-700/90 text-purple-100 hover:bg-purple-600 hover:text-white"
+            }`}
+          >
+            <FileText className="h-3.5 w-3.5 text-purple-200" />
+            <span>Keşif Zaptı Hazırla</span>
+          </button>
+          <button
+            onClick={() => setActiveTab("bilirkisiler")}
+            className={`flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition-all whitespace-nowrap shrink-0 ${
+              activeTab === "bilirkisiler"
+                ? "border-purple-300 bg-purple-600 text-white ring-2 ring-purple-400/40"
+                : "border-purple-500/40 bg-purple-950/70 text-purple-200 hover:bg-purple-800 hover:text-white"
+            }`}
+          >
+            <Users className="h-3.5 w-3.5 text-purple-300" />
+            <span>Bilirkişi Ekle ({registeredExperts.length})</span>
+          </button>
           <button
             onClick={() => setActiveTab("ai_rota")}
             className={`flex items-center gap-1.5 py-1 transition-colors whitespace-nowrap shrink-0 ${
@@ -3082,7 +3141,7 @@ export default function App() {
             }`}
           >
             <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
-            <span>Yapay Zeka Rota & Gün Tavsiyesi</span>
+            <span>YZ Rota</span>
           </button>
           <button
             onClick={() => setActiveTab("ayarlar")}
@@ -5159,6 +5218,24 @@ export default function App() {
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
+                    onClick={() => setActiveTab("kesif_zapti")}
+                    className="flex items-center gap-1.5 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-purple-700 whitespace-nowrap shadow-xs"
+                    title="Seçili keşiflerin zabıtlarını hazırla ve Word (.doc) belgesi olarak dışa aktar"
+                  >
+                    <FileText className="h-3.5 w-3.5 text-purple-200" />
+                    <span>Keşif Zaptı Hazırla</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("bilirkisiler")}
+                    className="flex items-center gap-1.5 rounded-lg border border-purple-300 bg-purple-50 px-2.5 py-1.5 text-xs font-bold text-purple-950 hover:bg-purple-100 whitespace-nowrap"
+                    title="Mahkemede görev alan bilirkişileri ve zapt açıklamalarını ekle/düzenle"
+                  >
+                    <Users className="h-3.5 w-3.5 text-purple-700" />
+                    <span>Bilirkişi Ekle ({registeredExperts.length})</span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setIsExcelModalOpen(true)}
                     className="flex items-center gap-1.5 rounded-lg border border-emerald-400 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-950 hover:bg-emerald-100 whitespace-nowrap shadow-2xs"
                     title="Aylık yapılan keşifleri (Dosya No, Keşif Tarihi, Katılan Hakim, Katip ve Mübaşir isimleriyle) Excel (.xls) olarak indir"
@@ -5596,6 +5673,18 @@ export default function App() {
                                 <div className="flex flex-wrap items-center gap-1.5">
                                   <button
                                     type="button"
+                                    onClick={() => {
+                                      setPreselectedMinutesRecordId(rec.id);
+                                      setActiveTab("kesif_zapti");
+                                    }}
+                                    className="inline-flex items-center gap-1 rounded border border-purple-400 bg-purple-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-purple-700 whitespace-nowrap"
+                                    title="Bu dosyanın keşif zaptını hazırla ve Word (.doc) olarak indir"
+                                  >
+                                    <FileText className="h-3 w-3" />
+                                    <span>Keşif Zaptı Hazırla</span>
+                                  </button>
+                                  <button
+                                    type="button"
                                     onClick={() => setEditingInspection(rec)}
                                     className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-950 hover:bg-amber-100 whitespace-nowrap"
                                     title="Bu keşfin tüm detaylarını (tarih, saat, parseller, bilirkişi, notlar) düzenle"
@@ -5854,6 +5943,23 @@ export default function App() {
               pushRecordsToCloudIfEnabled(updated);
             }}
             onSwitchToAgenda={() => setActiveTab("ajanda")}
+          />
+        )}
+
+        {/* VIEW 4.8: MOR MENÜ — KEŞİF ZAPTI HAZIRLA & BİLİRKİŞİ REHBERİ */}
+        {(activeTab === "kesif_zapti" || activeTab === "bilirkisiler") && (
+          <InspectionMinutesView
+            inspections={inspections}
+            registeredExperts={registeredExperts}
+            initialSubTab={
+              activeTab === "bilirkisiler" ? "bilirkisiler" : "zapt"
+            }
+            preselectedRecordId={preselectedMinutesRecordId}
+            onSaveRegisteredExperts={handleSaveRegisteredExperts}
+            onUpdateInspectionsBatch={(updatedList) => {
+              setInspections(updatedList);
+              pushRecordsToCloudIfEnabled(updatedList);
+            }}
           />
         )}
 
@@ -6184,6 +6290,17 @@ export default function App() {
         >
           <Plus className="h-4 w-4" />
           <span>+ Keşif</span>
+        </button>
+        <button
+          onClick={() => setActiveTab("kesif_zapti")}
+          className={`flex flex-col items-center gap-0.5 text-[10px] font-bold ${
+            activeTab === "kesif_zapti" || activeTab === "bilirkisiler"
+              ? "text-purple-700"
+              : "text-purple-600"
+          }`}
+        >
+          <FileText className="h-4 w-4" />
+          <span>Zapt Hazırla</span>
         </button>
         <button
           onClick={() => setActiveTab("ai_rota")}

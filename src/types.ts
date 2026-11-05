@@ -121,11 +121,26 @@ export interface InspectionRecord {
   status?: InspectionStatus; // planlandi | yapildi | iptal_edildi | ertelendi
   statusNote?: string; // Erteleme, iptal veya keşif icra notu
   judgeName?: string; // Keşfe katılan Hakim (Örn: "Kadir SAĞLAM")
+  judgeSicilNo?: string; // Hakim sicil numarası
   clerkName?: string; // Keşfe katılan Zabıt Katibi (Örn: "Mehmet AKIN", "Mahsuni BAŞBAYDAR")
+  clerkSicilNo?: string; // Katip sicil numarası
   bailiffName?: string; // Keşfe katılan Mübaşir (Örn: "Ebru YILMAZ")
+  bailiffSicilNo?: string; // Mübaşir sicil numarası
+  assignedExpertIds?: string[]; // Keşif zaptı için seçilen kayıtlı bilirkişi ID'leri
+  customMinutesText?: string; // Keşif zaptı özel düzenlenmiş metin (varsa)
   createdBy?: string; // Ayarlardaki kullanıcı adı + unvanı ve/veya bilgisayar/telefon adı
   createdByTitle?: CourtUserTitle | string; // Ekleyen kişinin unvanı
   deviceType?: "pc" | "mobile" | "tablet"; // Ekleyen cihaz türü
+  createdAt: string;
+}
+
+export interface RegisteredExpert {
+  id: string;
+  title: string; // Örn: "Fen Bilirkişisi", "Ziraat Bilirkişisi", "İnşaat Bilirkişisi"
+  fullName: string; // Örn: "Ahmet YILMAZ"
+  sicilNo: string; // Örn: "14523"
+  phone?: string; // İsteğe bağlı telefon
+  description: string; // Keşif zaptında bu bilirkişi seçildiğinde zapta otomatik atılacak açıklama metni
   createdAt: string;
 }
 
@@ -173,8 +188,10 @@ export type ActiveTab =
   | "harita"
   | "yeni_kesif"
   | "ai_rota"
+  | "kesif_zapti"
+  | "bilirkisiler"
   | "ayarlar";
 
-
 export type PdfExportPeriod = "daily" | "weekly" | "monthly";
+
 
