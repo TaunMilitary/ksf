@@ -16,28 +16,39 @@ import {
   Square,
   Save,
   BookOpen,
+  Car,
 } from "lucide-react";
 import { InspectionRecord, RegisteredExpert } from "../types";
 import {
   COURT_BAILIFF_PRESETS,
   COURT_CLERK_PRESETS,
   COURT_JUDGE_PRESETS,
-  getCaseTypeVisualMeta,
 } from "../data/fatsaData";
 import {
   formatAdaParselLabel,
-  formatAddressLabel,
-  formatAreaM2,
   formatDateTR,
-  formatVehicleLabel,
 } from "../services/geoService";
 import {
   buildDefaultExpertDescription,
+  buildGroupedParcelObservationGroups,
+  DEFAULT_REGISTERED_EXPERTS,
   downloadWordMinutesDocument,
   EXPERT_DIRECTORY_TITLES,
+  formatDateSlashTR,
+  formatEsasNoForTemplate,
+  formatExpertTitlesInlinePhrase,
   generateAutomaticMinutesText,
   MinutesGenerationOptions,
+  STAFF_DEFAULT_SICIL_MAP,
 } from "../services/wordMinutesService";
+
+function getExpertOrderRank(title: string): number {
+  const lower = title.toLocaleLowerCase("tr-TR");
+  if (lower.includes("fen") || lower.includes("kadastro")) return 1;
+  if (lower.includes("ziraat")) return 2;
+  if (lower.includes("inşaat")) return 3;
+  return 4;
+}
 
 interface InspectionMinutesViewProps {
   inspections: InspectionRecord[];
@@ -132,20 +143,30 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
   }, [sortedInspections, filteredList, activeRecordId]);
 
   // ============================================================================
-  // 2. AKTİF KEŞİF İÇİN PERSONEL (HAKİM, KATİP, MÜBAŞİR) VE BİLİRKİŞİ SEÇİMİ
+  // 2. AKTİF KEŞİF İÇİN PERSONEL (HAKİM, KATİP, MÜBAŞİR), BİLİRKİŞİ VE ŞABLON DETAYLARI
   // ============================================================================
   const [judgeName, setJudgeName] = useState<string>(
     COURT_JUDGE_PRESETS[0] || "Kadir SAĞLAM"
   );
-  const [judgeSicilNo, setJudgeSicilNo] = useState<string>("");
+  const [judgeSicilNo, setJudgeSicilNo] = useState<string>("267550");
   const [clerkName, setClerkName] = useState<string>(
     COURT_CLERK_PRESETS[0] || "Mehmet AKIN"
   );
-  const [clerkSicilNo, setClerkSicilNo] = useState<string>("");
+  const [clerkSicilNo, setClerkSicilNo] = useState<string>("186472");
   const [bailiffName, setBailiffName] = useState<string>(
     COURT_BAILIFF_PRESETS[0] || "Ebru YILMAZ"
   );
-  const [bailiffSicilNo, setBailiffSicilNo] = useState<string>("");
+  const [bailiffSicilNo, setBailiffSicilNo] = useState<string>("231993");
+
+  // Şablondaki ek değişkenler (Keşif Aracı, Yoklama Metni, Şoför Ücreti)
+  const [vehiclePlateText, setVehiclePlateText] = useState<string>(
+    "ATGV’ye ait 06CUD608 plaka sayılı keşif aracı vasıtasıyla"
+  );
+  const [attendingPartiesText, setAttendingPartiesText] = useState<string>(
+    "Keşif mahalinde yapılan yoklamada davacı vekili XXXXXX hazır bulunduğu görüldü. Açık keşfe devam olundu."
+  );
+  const [driverFeeText, setDriverFeeText] = useState<string>("2.500,00 TL");
+
   const [selectedExpertIds, setSelectedExpertIds] = useState<string[]>([]);
   const [isManualTextMode, setIsManualTextMode] = useState<boolean>(false);
   const [manualBodyText, setManualBodyText] = useState<string>("");
@@ -159,20 +180,33 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
   // Aktif dosya değiştiğinde o dosyada kayıtlı personel ve bilirkişileri yükle
   useEffect(() => {
     if (!activeRecord) return;
-    setJudgeName(
-      activeRecord.judgeName?.trim() || COURT_JUDGE_PRESETS[0] || "Kadir SAĞLAM"
-    );
-    setJudgeSicilNo(activeRecord.judgeSicilNo || "");
-    setClerkName(
-      activeRecord.clerkName?.trim() || COURT_CLERK_PRESETS[0] || "Mehmet AKIN"
-    );
-    setClerkSicilNo(activeRecord.clerkSicilNo || "");
-    setBailiffName(
+    const nextJudge =
+      activeRecord.judgeName?.trim() || COURT_JUDGE_PRESETS[0] || "Kadir SAĞLAM";
+    const nextClerk =
+      activeRecord.clerkName?.trim() || COURT_CLERK_PRESETS[0] || "Mehmet AKIN";
+    const nextBailiff =
       activeRecord.bailiffName?.trim() ||
-        COURT_BAILIFF_PRESETS[0] ||
-        "Ebru YILMAZ"
+      COURT_BAILIFF_PRESETS[0] ||
+      "Ebru YILMAZ";
+
+    setJudgeName(nextJudge);
+    setJudgeSicilNo(
+      activeRecord.judgeSicilNo?.trim() ||
+        STAFF_DEFAULT_SICIL_MAP[nextJudge] ||
+        "267550"
     );
-    setBailiffSicilNo(activeRecord.bailiffSicilNo || "");
+    setClerkName(nextClerk);
+    setClerkSicilNo(
+      activeRecord.clerkSicilNo?.trim() ||
+        STAFF_DEFAULT_SICIL_MAP[nextClerk] ||
+        ""
+    );
+    setBailiffName(nextBailiff);
+    setBailiffSicilNo(
+      activeRecord.bailiffSicilNo?.trim() ||
+        STAFF_DEFAULT_SICIL_MAP[nextBailiff] ||
+        "231993"
+    );
 
     if (
       activeRecord.assignedExpertIds &&
@@ -180,7 +214,6 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
     ) {
       setSelectedExpertIds(activeRecord.assignedExpertIds);
     } else if (activeRecord.experts && registeredExperts.length > 0) {
-      // Dosyadaki bilirkişi unvanlarına/isimlerine göre eşleşen kayıtlı bilirkişileri otomatik öner
       const recExpLower = activeRecord.experts.toLocaleLowerCase("tr-TR");
       const matched = registeredExperts
         .filter(
@@ -200,9 +233,14 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
               re.title.toLocaleLowerCase("tr-TR").includes("makine"))
         )
         .map((re) => re.id);
-      setSelectedExpertIds(matched);
+      if (matched.length > 0) {
+        setSelectedExpertIds(matched);
+      } else {
+        setSelectedExpertIds(registeredExperts.map((re) => re.id));
+      }
     } else {
-      setSelectedExpertIds([]);
+      // Varsayılan olarak kayıtlı şablon bilirkişilerini (Kenan YILDIZ, Serhan TURAN, Barış KIRCA) seç
+      setSelectedExpertIds(registeredExperts.map((re) => re.id));
     }
 
     if (activeRecord.customMinutesText) {
@@ -218,6 +256,12 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
     return registeredExperts.filter((e) => selectedExpertIds.includes(e.id));
   }, [registeredExperts, selectedExpertIds]);
 
+  const orderedActiveExperts = useMemo(() => {
+    return [...activeSelectedExperts].sort(
+      (a, b) => getExpertOrderRank(a.title) - getExpertOrderRank(b.title)
+    );
+  }, [activeSelectedExperts]);
+
   const autoGeneratedBodyText = useMemo(() => {
     if (!activeRecord) return "";
     return generateAutomaticMinutesText({
@@ -229,6 +273,9 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
       bailiffName,
       bailiffSicilNo,
       selectedExperts: activeSelectedExperts,
+      vehiclePlateText,
+      attendingPartiesText,
+      driverFeeTl: driverFeeText,
     });
   }, [
     activeRecord,
@@ -239,7 +286,15 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
     bailiffName,
     bailiffSicilNo,
     activeSelectedExperts,
+    vehiclePlateText,
+    attendingPartiesText,
+    driverFeeText,
   ]);
+
+  const activeObservationGroups = useMemo(() => {
+    if (!activeRecord) return [];
+    return buildGroupedParcelObservationGroups(activeRecord);
+  }, [activeRecord]);
 
   // Aktif dosyaya veya seçili tüm dosyalara personel ve bilirkişi seçimini kaydet
   const handleSaveStaffAndExpertsToRecord = (applyToAllSelected: boolean) => {
@@ -298,11 +353,16 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
         bailiffName,
         bailiffSicilNo,
         selectedExperts: activeSelectedExperts,
+        vehiclePlateText,
+        attendingPartiesText,
+        driverFeeTl: driverFeeText,
         customBodyOverride: isManualTextMode ? manualBodyText : undefined,
       },
     ]);
     showToast(
-      `📄 "${fileName}" Word belgesi (Alt bilgili: Fatsa 2. Sulh Hukuk Mahkemesi ${activeRecord.esasNo} Keşif Zaptı) indirildi.`
+      `📄 "${fileName}" Word belgesi (Fatsa 2. Sulh Hukuk Mahkemesi – ${formatEsasNoForTemplate(
+        activeRecord.esasNo
+      )} – Keşif Zaptı) indirildi.`
     );
   };
 
@@ -328,30 +388,44 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
         ? registeredExperts.filter((e) => rec.assignedExpertIds!.includes(e.id))
         : activeSelectedExperts;
 
+      const resolvedJudge = isCurrentActive
+        ? judgeName
+        : rec.judgeName?.trim() || judgeName;
+      const resolvedClerk = isCurrentActive
+        ? clerkName
+        : rec.clerkName?.trim() || clerkName;
+      const resolvedBailiff = isCurrentActive
+        ? bailiffName
+        : rec.bailiffName?.trim() || bailiffName;
+
       return {
         record: rec,
-        judgeName: isCurrentActive
-          ? judgeName
-          : rec.judgeName?.trim() || judgeName,
+        judgeName: resolvedJudge,
         judgeSicilNo: isCurrentActive
           ? judgeSicilNo
-          : rec.judgeSicilNo?.trim() || judgeSicilNo,
-        clerkName: isCurrentActive
-          ? clerkName
-          : rec.clerkName?.trim() || clerkName,
+          : rec.judgeSicilNo?.trim() ||
+            STAFF_DEFAULT_SICIL_MAP[resolvedJudge] ||
+            judgeSicilNo,
+        clerkName: resolvedClerk,
         clerkSicilNo: isCurrentActive
           ? clerkSicilNo
-          : rec.clerkSicilNo?.trim() || clerkSicilNo,
-        bailiffName: isCurrentActive
-          ? bailiffName
-          : rec.bailiffName?.trim() || bailiffName,
+          : rec.clerkSicilNo?.trim() ||
+            STAFF_DEFAULT_SICIL_MAP[resolvedClerk] ||
+            clerkSicilNo,
+        bailiffName: resolvedBailiff,
         bailiffSicilNo: isCurrentActive
           ? bailiffSicilNo
-          : rec.bailiffSicilNo?.trim() || bailiffSicilNo,
+          : rec.bailiffSicilNo?.trim() ||
+            STAFF_DEFAULT_SICIL_MAP[resolvedBailiff] ||
+            bailiffSicilNo,
         selectedExperts: recExperts,
-        customBodyOverride: isCurrentActive && isManualTextMode
-          ? manualBodyText
-          : rec.customMinutesText,
+        vehiclePlateText,
+        attendingPartiesText,
+        driverFeeTl: driverFeeText,
+        customBodyOverride:
+          isCurrentActive && isManualTextMode
+            ? manualBodyText
+            : rec.customMinutesText,
       };
     });
 
@@ -395,6 +469,21 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
     setExpSicilNo("");
     setExpDescription(
       buildDefaultExpertDescription(EXPERT_DIRECTORY_TITLES[0], "", "")
+    );
+  };
+
+  const handleRestoreDefaultTemplateExperts = () => {
+    const existingIds = new Set(registeredExperts.map((e) => e.id));
+    const merged = [...registeredExperts];
+    for (const defExp of DEFAULT_REGISTERED_EXPERTS) {
+      if (!existingIds.has(defExp.id)) {
+        merged.push(defExp);
+      }
+    }
+    onSaveRegisteredExperts(merged);
+    setSelectedExpertIds(merged.map((e) => e.id));
+    showToast(
+      "✓ Şablondaki mahkeme bilirkişileri (Kenan YILDIZ, Serhan TURAN, Barış KIRCA) listeye yüklendi."
     );
   };
 
@@ -482,6 +571,60 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
     );
   };
 
+  // Canlı Önizleme İçin Yardımcı Hesaplamalar
+  const previewEsasDisplay = activeRecord
+    ? formatEsasNoForTemplate(activeRecord.esasNo)
+    : "2025/1335 Esas";
+  const previewSlashDate = activeRecord
+    ? formatDateSlashTR(activeRecord.date)
+    : "05/11/2026";
+  const previewJudgeSicil =
+    judgeSicilNo.trim() ||
+    STAFF_DEFAULT_SICIL_MAP[judgeName.trim()] ||
+    "267550";
+  const previewClerkSicil =
+    clerkSicilNo.trim() ||
+    STAFF_DEFAULT_SICIL_MAP[clerkName.trim()] ||
+    "186472";
+  const previewBailiffSicil =
+    bailiffSicilNo.trim() ||
+    STAFF_DEFAULT_SICIL_MAP[bailiffName.trim()] ||
+    "231993";
+
+  const previewExpertTitlesSentence = formatExpertTitlesInlinePhrase(
+    activeSelectedExperts,
+    activeRecord?.experts
+  );
+
+  // Alt İmza Tablosu 2. Satırı (Ziraat Bilirkişisi | Fen Bilirkişisi | İnşaat Bilirkişisi)
+  const signatureRowExperts = useMemo(() => {
+    if (activeSelectedExperts.length === 0) {
+      return ["Ziraat Bilirkişisi", "Fen Bilirkişisi", "İnşaat Bilirkişisi"];
+    }
+    const ziraat = activeSelectedExperts.find((e) =>
+      e.title.toLocaleLowerCase("tr-TR").includes("ziraat")
+    );
+    const fen = activeSelectedExperts.find((e) =>
+      e.title.toLocaleLowerCase("tr-TR").includes("fen")
+    );
+    const insaat = activeSelectedExperts.find((e) =>
+      e.title.toLocaleLowerCase("tr-TR").includes("inşaat")
+    );
+    const ordered: string[] = [];
+    if (ziraat) ordered.push(ziraat.title);
+    if (fen) ordered.push(fen.title);
+    if (insaat) ordered.push(insaat.title);
+    for (const exp of activeSelectedExperts) {
+      if (!ordered.includes(exp.title)) {
+        ordered.push(exp.title);
+      }
+    }
+    while (ordered.length < 3) {
+      ordered.push("");
+    }
+    return ordered.slice(0, 3);
+  }, [activeSelectedExperts]);
+
   return (
     <div className="space-y-4">
       {/* ====================================================================
@@ -492,15 +635,17 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
           <div className="space-y-1">
             <div className="inline-flex items-center gap-2 rounded-md bg-purple-500/25 border border-purple-400/40 px-2.5 py-0.5 text-[11px] font-bold text-purple-200">
               <FileText className="h-3.5 w-3.5 text-purple-300" />
-              <span>T.C. FATSA 2. SULH HUKUK MAHKEMESİ · OTOMATİK KEŞİF ZAPTI & WORD SİSTEMİ</span>
+              <span>
+                T.C. FATSA 2. SULH HUKUK MAHKEMESİ · RESMİ KEŞİF ZAPTI ŞABLONU & WORD SİSTEMİ
+              </span>
             </div>
             <h1 className="text-base sm:text-xl font-bold tracking-tight text-white">
               Keşif Zaptı Hazırla & Mahkeme Bilirkişi Rehberi
             </h1>
             <p className="text-xs text-purple-200/90 max-w-3xl">
-              Seçtiğiniz keşiflerin zabıtlarını görevli Hakim, Katip, Mübaşir ve Bilirkişi açıklamalarıyla otomatik oluşturun; alt bilgisinde{" "}
+              Seçtiğiniz keşiflerin zabıtlarını resmi mahkeme şablonuna birebir uygun olarak görevli Hakim, Katip, Mübaşir ve Bilirkişi kimlik/açıklama metinleriyle otomatik oluşturun; alt bilgisinde{" "}
               <strong className="text-white">
-                &ldquo;Fatsa 2. Sulh Hukuk Mahkemesi #DosyaNo Keşif Zaptı&rdquo;
+                &ldquo;Fatsa 2. Sulh Hukuk Mahkemesi – #DosyaNo – Keşif Zaptı&rdquo;
               </strong>{" "}
               ve sayfa numarası bulunan düzenli <strong>Word (.doc)</strong> belgesi olarak dışarı aktarın.
             </p>
@@ -631,7 +776,7 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
                     required
                     value={expFullName}
                     onChange={(e) => setExpFullName(e.target.value)}
-                    placeholder="Örn: Ahmet YILMAZ"
+                    placeholder="Örn: Kenan YILDIZ"
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs sm:text-sm font-semibold text-slate-900 focus:border-purple-600 focus:outline-none"
                   />
                 </div>
@@ -644,7 +789,7 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
                     type="text"
                     value={expSicilNo}
                     onChange={(e) => setExpSicilNo(e.target.value)}
-                    placeholder="Örn: 52-1045 veya Sicil No"
+                    placeholder="Örn: 16294 veya T.C. No"
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs sm:text-sm font-mono font-bold text-slate-900 focus:border-purple-600 focus:outline-none"
                   />
                 </div>
@@ -677,11 +822,12 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
                   required
                   value={expDescription}
                   onChange={(e) => setExpDescription(e.target.value)}
-                  placeholder="Keşif zaptı hazırlanırken bu bilirkişi seçildiğinde zapta otomatik eklenecek açıklama ve beyan metnini buraya yazınız..."
+                  placeholder="Örn: Fen Bilirkişisi Kenan YILDIZ: 16294 Sicil Numaralı, 56698381242 T.C. Kimlik numaralı... Tarafları tanımaz, engel hali yok, yemini yaptırıldı. Yapacağı iş anlatıldı."
                   className="w-full rounded-lg border border-slate-300 p-3 text-xs leading-relaxed text-slate-900 focus:border-purple-600 focus:outline-none"
                 />
                 <p className="text-[11px] text-slate-500 mt-1">
-                  Keşif zaptı hazırlarken bu bilirkişiyi seçtiğinizde, yukarıdaki kutuda yazan açıklama metni doğrudan Word keşif zaptının içine aktarılır.
+                  Keşif zaptı hazırlarken bu bilirkişiyi seçtiğinizde, yukarıdaki kutuda yazan kimlik ve açıklama metni doğrudan Word keşif zaptındaki{" "}
+                  <strong>&ldquo;Bilirkişilerin kimliklerinin tespitine geçildi.&rdquo;</strong> bölümünün altına aktarılır.
                 </p>
               </div>
 
@@ -721,25 +867,43 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
                   Eklediğiniz bilirkişileri keşif zaptı hazırlarken tek tıkla seçebilirsiniz.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setSubTab("zapt")}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-purple-700"
-              >
-                <FileText className="h-3.5 w-3.5" />
-                <span>Keşif Zaptı Hazırlama Ekranına Geç &rarr;</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleRestoreDefaultTemplateExperts}
+                  className="inline-flex items-center gap-1 rounded-lg border border-purple-300 bg-purple-50 px-2.5 py-1.5 text-xs font-bold text-purple-900 hover:bg-purple-100"
+                >
+                  <RotateCcw className="h-3.5 w-3.5 text-purple-600" />
+                  <span>Şablon Bilirkişilerini Yükle</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSubTab("zapt")}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-purple-700"
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  <span>Keşif Zaptı Hazırlama Ekranına Geç &rarr;</span>
+                </button>
+              </div>
             </div>
 
             {registeredExperts.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center space-y-2">
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center space-y-3">
                 <Users className="mx-auto h-8 w-8 text-purple-400" />
                 <div className="text-sm font-bold text-slate-800">
                   Henüz kayıtlı bilirkişi eklenmedi
                 </div>
                 <p className="text-xs text-slate-500 max-w-md mx-auto">
-                  Sol taraftaki formdan mahkemede görev alan bilirkişilerin unvan, ad soyad, sicil numarası ve zapt açıklama metinlerini ekleyebilirsiniz.
+                  Sol taraftaki formdan yeni bilirkişi ekleyebilir veya örnek keşif zaptındaki varsayılan bilirkişileri (Kenan YILDIZ, Serhan TURAN, Barış KIRCA) tek tıkla yükleyebilirsiniz.
                 </p>
+                <button
+                  type="button"
+                  onClick={handleRestoreDefaultTemplateExperts}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-purple-600 px-4 py-2 text-xs font-bold text-white hover:bg-purple-700"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  <span>Örnek Şablondaki 3 Bilirkişiyi Otomatik Yükle</span>
+                </button>
               </div>
             ) : (
               <div className="space-y-3">
@@ -764,7 +928,7 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
                           </span>
                           {exp.sicilNo && (
                             <span className="rounded bg-slate-200 px-2 py-0.5 font-mono text-[11px] font-bold text-slate-800">
-                              Sicil No: {exp.sicilNo}
+                              Sicil / T.C.: {exp.sicilNo}
                             </span>
                           )}
                         </div>
@@ -825,7 +989,7 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
          ==================================================================== */}
       {subTab === "zapt" && (
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-12 items-start">
-          {/* SOL 5 SÜTUN: 1) Keşif Seçimi, 2) Personel Seçimi, 3) Bilirkişi Seçimi */}
+          {/* SOL 5 SÜTUN: 1) Keşif Seçimi, 2) Personel Seçimi, 3) Bilirkişi Seçimi, 4) Araç/Yoklama Detayı */}
           <div className="lg:col-span-5 space-y-4">
             {/* KUTU 1: Keşif Dosyası Seçimi */}
             <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs space-y-3">
@@ -945,7 +1109,7 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
                                 {rec.esasNo}
                               </span>
                               <span className="text-[11px] font-mono text-slate-600">
-                                ({formatDateTR(rec.date)} · {rec.time})
+                                ({formatDateSlashTR(rec.date)} · {rec.time})
                               </span>
                             </div>
                             <div className="truncate text-[11px] text-slate-700">
@@ -989,7 +1153,12 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
                       <button
                         key={j}
                         type="button"
-                        onClick={() => setJudgeName(j)}
+                        onClick={() => {
+                          setJudgeName(j);
+                          if (STAFF_DEFAULT_SICIL_MAP[j]) {
+                            setJudgeSicilNo(STAFF_DEFAULT_SICIL_MAP[j]);
+                          }
+                        }}
                         className={`rounded border px-2 py-0.5 text-[11px] font-bold ${
                           judgeName.trim() === j
                             ? "border-purple-600 bg-purple-600 text-white"
@@ -1014,8 +1183,8 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
                     type="text"
                     value={judgeSicilNo}
                     onChange={(e) => setJudgeSicilNo(e.target.value)}
-                    placeholder="Sicil No (Ops.)"
-                    className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-mono text-slate-900 focus:border-purple-600 focus:outline-none"
+                    placeholder="Sicil No (267550)"
+                    className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:border-purple-600 focus:outline-none"
                   />
                 </div>
               </div>
@@ -1031,7 +1200,10 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
                       <button
                         key={c}
                         type="button"
-                        onClick={() => setClerkName(c)}
+                        onClick={() => {
+                          setClerkName(c);
+                          setClerkSicilNo(STAFF_DEFAULT_SICIL_MAP[c] || "");
+                        }}
                         className={`rounded border px-2 py-0.5 text-[11px] font-bold ${
                           clerkName.trim() === c
                             ? "border-purple-600 bg-purple-600 text-white"
@@ -1056,8 +1228,8 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
                     type="text"
                     value={clerkSicilNo}
                     onChange={(e) => setClerkSicilNo(e.target.value)}
-                    placeholder="Sicil No (Ops.)"
-                    className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-mono text-slate-900 focus:border-purple-600 focus:outline-none"
+                    placeholder="Sicil No (186472)"
+                    className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:border-purple-600 focus:outline-none"
                   />
                 </div>
               </div>
@@ -1073,7 +1245,12 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
                       <button
                         key={b}
                         type="button"
-                        onClick={() => setBailiffName(b)}
+                        onClick={() => {
+                          setBailiffName(b);
+                          if (STAFF_DEFAULT_SICIL_MAP[b]) {
+                            setBailiffSicilNo(STAFF_DEFAULT_SICIL_MAP[b]);
+                          }
+                        }}
                         className={`rounded border px-2 py-0.5 text-[11px] font-bold ${
                           bailiffName.trim() === b
                             ? "border-purple-600 bg-purple-600 text-white"
@@ -1098,8 +1275,8 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
                     type="text"
                     value={bailiffSicilNo}
                     onChange={(e) => setBailiffSicilNo(e.target.value)}
-                    placeholder="Sicil No (Ops.)"
-                    className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-mono text-slate-900 focus:border-purple-600 focus:outline-none"
+                    placeholder="Sicil No (231993)"
+                    className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:border-purple-600 focus:outline-none"
                   />
                 </div>
               </div>
@@ -1127,16 +1304,26 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
               {registeredExperts.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-purple-300 bg-purple-50/50 p-4 text-center space-y-2">
                   <p className="text-xs text-purple-950 font-medium">
-                    Henüz kayıtlı bilirkişi tanımlamadınız. Bilirkişi unvanı, adı soyadı, sicil numarası ve zapta otomatik eklenecek açıklama metni girmek için aşağıdaki butona tıklayın:
+                    Henüz kayıtlı bilirkişi bulunmuyor. Resmi şablondaki 3 bilirkişiyi (Kenan YILDIZ, Serhan TURAN, Barış KIRCA) yüklemek veya yeni eklemek için tıklayın:
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => setSubTab("bilirkisiler")}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-purple-600 px-3.5 py-2 text-xs font-bold text-white hover:bg-purple-700"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    <span>Bilirkişi Ekleme Menüsünü Aç</span>
-                  </button>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleRestoreDefaultTemplateExperts}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-purple-600 px-3.5 py-2 text-xs font-bold text-white hover:bg-purple-700"
+                    >
+                      <Sparkles className="h-3.5 w-3.5" />
+                      <span>Şablondaki 3 Bilirkişiyi Yükle</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSubTab("bilirkisiler")}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-purple-300 bg-white px-3.5 py-2 text-xs font-bold text-purple-900 hover:bg-purple-50"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      <span>Bilirkişi Menüsünü Aç</span>
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
@@ -1167,7 +1354,7 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
                             </span>
                             {exp.sicilNo && (
                               <span className="font-mono text-[10px] text-slate-600">
-                                (Sicil: {exp.sicilNo})
+                                (Sicil/TC: {exp.sicilNo})
                               </span>
                             )}
                           </div>
@@ -1200,6 +1387,54 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
                 )}
               </div>
             </div>
+
+            {/* KUTU 4: Keşif Aracı Plakası ve Yoklama Metni (Şablondaki Kırmızı Alanlar) */}
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs space-y-3">
+              <div className="flex items-center gap-1.5 border-b border-slate-200 pb-2">
+                <Car className="h-4 w-4 text-purple-600" />
+                <h2 className="text-xs sm:text-sm font-bold text-slate-900">
+                  4. Keşif Aracı, Yoklama & Şoför Ücreti Bilgileri
+                </h2>
+              </div>
+
+              <div className="space-y-2.5 text-xs">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Keşif Aracı / Vasıta İbaresi:
+                  </label>
+                  <input
+                    type="text"
+                    value={vehiclePlateText}
+                    onChange={(e) => setVehiclePlateText(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 focus:border-purple-600 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-red-800 mb-1">
+                    Yoklama & Hazır Bulunan Taraf Metni (Şablonda Kırmızı Alan):
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={attendingPartiesText}
+                    onChange={(e) => setAttendingPartiesText(e.target.value)}
+                    className="w-full rounded-lg border border-red-200 bg-red-50/30 px-2.5 py-1.5 text-xs text-red-950 focus:border-purple-600 focus:bg-white focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    G.D. 4. Madde Şoför Ücreti:
+                  </label>
+                  <input
+                    type="text"
+                    value={driverFeeText}
+                    onChange={(e) => setDriverFeeText(e.target.value)}
+                    className="w-40 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 focus:border-purple-600 focus:outline-none"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* SAĞ 7 SÜTUN: CANLI A4 KEŞİF ZAPTI ÖNİZLEMESİ VE WORD (.DOC) İNDİRME */}
@@ -1209,15 +1444,14 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h2 className="text-sm sm:text-base font-bold text-slate-900">
-                    Word (.doc) Keşif Zaptı Çıktısı & Canlı Sayfa Önizlemesi
+                    Word (.doc) Keşif Zaptı Çıktısı & Resmi Şablon Önizlemesi
                   </h2>
                   <p className="text-[11px] text-slate-500">
                     Alt bilgi:{" "}
                     <code className="rounded bg-purple-50 px-1.5 py-0.5 font-mono text-purple-900 font-semibold">
-                      Fatsa 2. Sulh Hukuk Mahkemesi{" "}
-                      {activeRecord?.esasNo || "#DosyaNo"} Keşif Zaptı
+                      Fatsa 2. Sulh Hukuk Mahkemesi – {previewEsasDisplay} – Keşif Zaptı
                     </code>{" "}
-                    · Otomatik Sayfa Numaralı
+                    · Sayfa Numaralı
                   </p>
                 </div>
 
@@ -1281,8 +1515,8 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
                     <Pencil className="h-3 w-3" />
                     <span>
                       {isManualTextMode
-                        ? "Metin Elle Düzenleme Modunda (Otomatik Moda Dön)"
-                        : "Zapt Metnini Elle Düzenle"}
+                        ? "Metin Elle Düzenleme Modunda (Resmi Şablon Görünümüne Dön)"
+                        : "Zapt Metnini Elle Serbest Düzenle"}
                     </span>
                   </button>
                   {isManualTextMode && (
@@ -1295,17 +1529,17 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
                       className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 hover:text-red-600"
                     >
                       <RotateCcw className="h-3 w-3" />
-                      <span>Otomatik Metne Sıfırla</span>
+                      <span>Otomatik Şablona Sıfırla</span>
                     </button>
                   )}
                 </div>
                 <span className="text-[11px] text-slate-500">
-                  Seçtiğiniz personel ve bilirkişilerin açıklamaları zapta otomatik yansır.
+                  Gönderdiğiniz 2025/1335 Esas sayılı resmi şablona birebir uygundur.
                 </span>
               </div>
             </div>
 
-            {/* A4 SAYFA ÖNİZLEMESİ */}
+            {/* A4 SAYFA ÖNİZLEMESİ (2025-1335.pdf ŞABLONUNA BİREBİR UYGUN) */}
             {!activeRecord ? (
               <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center space-y-2">
                 <FileText className="mx-auto h-8 w-8 text-slate-400" />
@@ -1317,265 +1551,240 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
                 </p>
               </div>
             ) : (
-              <div className="rounded-2xl border border-slate-300 bg-white p-6 sm:p-9 shadow-md font-serif text-slate-950 space-y-5">
-                {/* Kurumsal Başlık */}
-                <div className="border-b-2 border-slate-900 pb-3 text-center space-y-0.5">
-                  <div className="text-sm sm:text-base font-bold tracking-wide">
-                    T.C.
+              <div className="rounded-2xl border border-slate-300 bg-white p-6 sm:p-10 shadow-md font-serif text-slate-950 space-y-3 text-xs sm:text-[13.5px] leading-relaxed">
+                {/* 1. ÜST ORTALI BAŞLIK (T.C. / FATSA / 2.SULH HUKUK MAHKEMESİ) */}
+                <div className="text-center font-bold leading-snug mb-3">
+                  <div>T.C.</div>
+                  <div>FATSA</div>
+                  <div>2.SULH HUKUK MAHKEMESİ</div>
+                </div>
+
+                {/* 2. SAYI / "KEŞİF ZAPTI" / HAKİM / KATİP / Keş.Tar. */}
+                <div className="space-y-0.5 text-xs sm:text-[13.5px]">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="inline-block w-20 font-bold">SAYI</span>
+                      <span className="font-bold">: {previewEsasDisplay}</span>
+                    </div>
+                    <div className="font-bold italic pr-4 sm:pr-12">
+                      &ldquo;KEŞİF ZAPTI&rdquo;
+                    </div>
                   </div>
-                  <div className="text-sm sm:text-base font-bold tracking-wide">
-                    FATSA 2. SULH HUKUK MAHKEMESİ
+                  <div>
+                    <span className="inline-block w-20 font-bold">HAKİM</span>
+                    <span className="font-bold">
+                      : {(judgeName || "Kadir SAĞLAM").toLocaleUpperCase("tr-TR")}{" "}
+                      {previewJudgeSicil}
+                    </span>
                   </div>
-                  <div className="text-xs sm:text-sm font-bold tracking-wider">
-                    KEŞİF ZAPTI (KEŞİF TUTANAĞI)
+                  <div>
+                    <span className="inline-block w-20 font-bold">KATİP</span>
+                    <span className="font-bold">
+                      : {(clerkName || "Mehmet AKIN").toLocaleUpperCase("tr-TR")}{" "}
+                      {previewClerkSicil}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="inline-block w-20 font-bold">Keş.Tar.</span>
+                    <span className="font-bold">: {previewSlashDate}</span>
                   </div>
                 </div>
 
-                {/* Künye Bilgileri */}
-                <div className="grid grid-cols-1 gap-1.5 text-xs sm:text-[13px] leading-snug">
-                  <div className="grid grid-cols-12">
-                    <span className="col-span-4 font-bold">ESAS NUMARASI</span>
-                    <span className="col-span-8 font-bold">
-                      : {activeRecord.esasNo}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-12">
-                    <span className="col-span-4 font-bold">HAKİM</span>
-                    <span className="col-span-8">
-                      : {judgeName || "Kadir SAĞLAM"}
-                      {judgeSicilNo.trim() ? ` (${judgeSicilNo.trim()})` : ""}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-12">
-                    <span className="col-span-4 font-bold">ZABIT KATİBİ</span>
-                    <span className="col-span-8">
-                      : {clerkName || "Mehmet AKIN"}
-                      {clerkSicilNo.trim() ? ` (${clerkSicilNo.trim()})` : ""}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-12">
-                    <span className="col-span-4 font-bold">MÜBAŞİR</span>
-                    <span className="col-span-8">
-                      : {bailiffName || "Ebru YILMAZ"}
-                      {bailiffSicilNo.trim()
-                        ? ` (${bailiffSicilNo.trim()})`
-                        : ""}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-12">
-                    <span className="col-span-4 font-bold">
-                      KEŞİF TARİHİ VE SAATİ
-                    </span>
-                    <span className="col-span-8">
-                      : {formatDateTR(activeRecord.date)} — Saat{" "}
-                      {activeRecord.time}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-12">
-                    <span className="col-span-4 font-bold">
-                      DAVA / KEŞİF KONUSU
-                    </span>
-                    <span className="col-span-8">: {activeRecord.caseType}</span>
-                  </div>
-                  <div className="grid grid-cols-12">
-                    <span className="col-span-4 font-bold">
-                      KEŞİF YERİ (İLÇE / MAHALLE)
-                    </span>
-                    <span className="col-span-8">
-                      : Ordu İli, {activeRecord.district} İlçesi,{" "}
-                      {activeRecord.neighborhood}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Taşınmaz / Parsel Cetveli */}
-                <div className="space-y-1.5">
-                  <div className="text-xs font-bold uppercase">
-                    KEŞİF KONUSU TAŞINMAZ / PARSEL CETVELİ:
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full border-collapse border border-slate-500 text-xs">
-                      <thead>
-                        <tr className="bg-slate-100">
-                          <th className="border border-slate-500 px-2 py-1 text-center">
-                            Sıra
-                          </th>
-                          <th className="border border-slate-500 px-2 py-1 text-left">
-                            İlçe
-                          </th>
-                          <th className="border border-slate-500 px-2 py-1 text-left">
-                            Mahalle / Köy
-                          </th>
-                          <th className="border border-slate-500 px-2 py-1 text-center">
-                            Ada No
-                          </th>
-                          <th className="border border-slate-500 px-2 py-1 text-center">
-                            Parsel No
-                          </th>
-                          <th className="border border-slate-500 px-2 py-1 text-center">
-                            B.Bölüm
-                          </th>
-                          <th className="border border-slate-500 px-2 py-1 text-left">
-                            Niteliği
-                          </th>
-                          <th className="border border-slate-500 px-2 py-1 text-right">
-                            Yüzölçümü
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {activeRecord.parcels &&
-                        activeRecord.parcels.length > 0 ? (
-                          activeRecord.parcels.map((p, idx) => (
-                            <tr key={p.id || idx}>
-                              <td className="border border-slate-500 px-2 py-1 text-center">
-                                {idx + 1}
-                              </td>
-                              <td className="border border-slate-500 px-2 py-1">
-                                {activeRecord.district}
-                              </td>
-                              <td className="border border-slate-500 px-2 py-1">
-                                {p.neighborhood || activeRecord.neighborhood}
-                              </td>
-                              <td className="border border-slate-500 px-2 py-1 text-center font-bold">
-                                {p.adaNo}
-                              </td>
-                              <td className="border border-slate-500 px-2 py-1 text-center font-bold">
-                                {p.parselNo}
-                              </td>
-                              <td className="border border-slate-500 px-2 py-1 text-center">
-                                {p.bagimsizBolumNo || "-"}
-                              </td>
-                              <td className="border border-slate-500 px-2 py-1">
-                                {p.nitelik || activeRecord.nitelik || "-"}
-                              </td>
-                              <td className="border border-slate-500 px-2 py-1 text-right">
-                                {p.yuzolcumuM2
-                                  ? `${formatAreaM2(p.yuzolcumuM2)} m²`
-                                  : "-"}
-                              </td>
-                            </tr>
-                          ))
-                        ) : (
-                          <tr>
-                            <td className="border border-slate-500 px-2 py-1 text-center">
-                              1
-                            </td>
-                            <td className="border border-slate-500 px-2 py-1">
-                              {activeRecord.district}
-                            </td>
-                            <td className="border border-slate-500 px-2 py-1">
-                              {activeRecord.neighborhood}
-                            </td>
-                            <td className="border border-slate-500 px-2 py-1 text-center font-bold">
-                              {activeRecord.adaNo || "-"}
-                            </td>
-                            <td className="border border-slate-500 px-2 py-1 text-center font-bold">
-                              {activeRecord.parselNo || "-"}
-                            </td>
-                            <td className="border border-slate-500 px-2 py-1 text-center">
-                              {activeRecord.bagimsizBolumNo || "-"}
-                            </td>
-                            <td className="border border-slate-500 px-2 py-1">
-                              {activeRecord.nitelik ||
-                                activeRecord.addressDetail ||
-                                activeRecord.vehicleInfo?.plateNo ||
-                                "-"}
-                            </td>
-                            <td className="border border-slate-500 px-2 py-1 text-right">
-                              {activeRecord.yuzolcumuM2
-                                ? `${formatAreaM2(activeRecord.yuzolcumuM2)} m²`
-                                : "-"}
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Zapt Gövde Metni (Otomatik veya Manuel Düzenlenebilir) */}
+                {/* 3. GÖVDE METNİ (OTOMATİK RESMİ ŞABLON VEYA MANUEL DÜZENLEME) */}
                 {isManualTextMode ? (
-                  <div className="space-y-1.5 font-sans">
+                  <div className="space-y-1.5 font-sans pt-2">
                     <label className="block text-xs font-bold text-amber-900">
                       Keşif Zaptı Gövde Metni (Serbest Düzenleme Modu):
                     </label>
                     <textarea
-                      rows={14}
+                      rows={18}
                       value={manualBodyText}
                       onChange={(e) => setManualBodyText(e.target.value)}
                       className="w-full rounded-xl border border-amber-400 bg-amber-50/30 p-3 font-serif text-xs sm:text-sm leading-relaxed text-slate-950 focus:border-purple-600 focus:bg-white focus:outline-none"
                     />
                   </div>
                 ) : (
-                  <div className="space-y-3 text-xs sm:text-[13.5px] leading-relaxed text-justify whitespace-pre-line">
-                    {autoGeneratedBodyText}
+                  <div className="space-y-2 pt-2 text-justify">
+                    <p className="indent-8">
+                      Belirli gün ve saatte mahkememiz hakimi{" "}
+                      {judgeName || "Kadir SAĞLAM"} ({previewJudgeSicil}), zabıt
+                      katibi {clerkName || "Mehmet AKIN"}
+                      {previewClerkSicil ? ` (${previewClerkSicil})` : ""},
+                      mübaşir {bailiffName || "Ebru YILMAZ"} (
+                      {previewBailiffSicil}) ve yanımızda{" "}
+                      {previewExpertTitlesSentence} olduğu halde mahkememiz
+                      önünden {vehiclePlateText} hareket edilerek keşif mahaline
+                      gelindi.
+                    </p>
+                    <p className="indent-8">Açık keşfe başlandı.</p>
+                    <p className="indent-8 font-medium text-red-800">
+                      {attendingPartiesText}
+                    </p>
+                    <p className="indent-8">
+                      Bilirkişilerin kimliklerinin tespitine geçildi.
+                    </p>
+
+                    {/* Seçili Bilirkişi Kimlik ve Açıklama Metinleri */}
+                    {orderedActiveExperts.length > 0 ? (
+                      orderedActiveExperts.map((exp) => (
+                        <p key={exp.id} className="indent-8">
+                          {exp.description?.trim() ||
+                            buildDefaultExpertDescription(
+                              exp.title,
+                              exp.fullName,
+                              exp.sicilNo
+                            )}
+                        </p>
+                      ))
+                    ) : (
+                      <p className="indent-8 text-slate-500 italic">
+                        (Sol taraftan keşfe katılan bilirkişileri seçtiğinizde kimlik ve yemin açıklamaları buraya otomatik eklenir.)
+                      </p>
+                    )}
+
+                    <p className="indent-8">
+                      Dava konusu olan taşınmazlar bilirkişiler eşliğinde ayrı
+                      ayrı gezildi. Sınırları ve yüzölçümü, üzerinde bulunan
+                      muhdesatların nelerden ibaret olduğu hususları gezilerek
+                      incelendi, fotoğrafları çekildi. Fen bilirkişisine sınırları
+                      gösterildi, diğer bilirkişilere ise taşınmazların niteliği,
+                      değeri, zirai ve inşai muhtesatların özellikleri ve değeri
+                      ile dosyadaki mevcut tüm delillere göre ayrı ayrı ayrıntılı
+                      rapor tanzim etmeleri hususu anlatıldı. Soruldu: Konuyu
+                      anladık, incelememizi yaptık, ayrı ayrı rapor tanzim edip
+                      vereceğiz dediler. Beyanları okundu. İmzaları alındı.
+                    </p>
+
+                    {/* Ara Bilirkişi İmza Satırı */}
+                    <div className="py-5 text-center font-medium">
+                      {(orderedActiveExperts.length > 0
+                        ? orderedActiveExperts.map((e) => e.title)
+                        : [
+                            "Fen Bilirkişisi",
+                            "Ziraat Bilirkişisi",
+                            "İnşaat Bilirkişisi",
+                          ]
+                      ).map((t, i) => (
+                        <span key={i} className="mx-3 sm:mx-6 inline-block">
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+
+                    {/* Keşif Heyeti Gözleminde; Taşınmaz / Parsel Listesi (Kırmızı Vurgulu) */}
+                    {activeObservationGroups.map((grp, gIdx) => (
+                      <div key={gIdx} className="space-y-0.5">
+                        <p className="indent-8 font-semibold text-red-800">
+                          {grp.headerLine}
+                        </p>
+                        {grp.parcelLines.map((line, lIdx) => (
+                          <p
+                            key={lIdx}
+                            className="indent-8 font-semibold text-red-800"
+                          >
+                            {line}
+                          </p>
+                        ))}
+                      </div>
+                    ))}
+
+                    <p className="indent-8 pt-2">
+                      Davacı vekilinden soruldu: Keşif yapılan yerler dava konusu
+                      yerlerdir. Dava dilekçemizi tekrar ederiz, dedi.
+                    </p>
+                    <p className="indent-8">
+                      Davalı vekilinden soruldu: Keşif yapılan yerler dava konusu
+                      yerlerdir. Cevap dilekçemizi tekrar ederiz, dedi.
+                    </p>
+                    <p className="indent-8">
+                      Keşif mahallinde yapılacak başka işlem kalmadığından açık
+                      keşfe son verildi.
+                    </p>
+
+                    {/* G.D. Hükümleri */}
+                    <p className="indent-8 font-bold pt-1">G.D.</p>
+                    <p className="indent-8">
+                      1-Fen Bilirkişisine 15 gün içerisinde, Ziraat Bilirkişisine
+                      25 gün içerisinde, İnşaat Bilirkişisine 35 gün içerisinde
+                      raporlarını sunmak üzere süre verilmesine,
+                    </p>
+                    <p className="indent-8">
+                      2-Keşfe katılan fen bilirkişisine emek ve mesaisi karşılığı
+                      takdiren 3.500,00 TL, ziraat bilirkişisine 4.000,00 TL,
+                      inşaat bilirkişisine 4.000,00 TL ücret takdirine, raporlarını
+                      ibraz ettiklerinde sarf kararları yazılıp birleştirilerek
+                      bilirkişilere ödenmesine, (Bilirkişi sarf kararlarının UYAP
+                      üzerinden elektronik imza ile imzalanmasına, bu nedenle fiziki
+                      sarf kararı hazırlanmasına yer olmadığına),
+                    </p>
+                    <p className="indent-8">
+                      3-Bilirkişi raporları dosyaya ibraz edildiğinde taraflara
+                      tebliğine,
+                    </p>
+                    <p className="indent-8">
+                      4-Keşif aracını kullanan şoföre emek ve mesaisine karşılık
+                      olmak üzere {driverFeeText} ücret takdirine, suçüstü
+                      ödeneğinden karşılanmak üzere, karar kesinleştiğinde davalı
+                      taraftan tahsil edilmek üzere, şimdilik koşulsuz olarak
+                      ödenmesine,
+                    </p>
+                    <p className="indent-8">
+                      Dair, hazır olanların yüzüne karşı verilen ara karar açıkça
+                      okunup usulen anlatıldı. {previewSlashDate}
+                    </p>
                   </div>
                 )}
 
-                {/* İmza Blokları */}
-                <div className="pt-6 space-y-6">
-                  <div className="grid grid-cols-3 gap-4 text-center text-xs sm:text-[13px]">
-                    <div>
-                      <div className="font-bold">Zabıt Katibi</div>
-                      <div>
-                        {clerkName || "Mehmet AKIN"}
-                        {clerkSicilNo.trim() ? ` (${clerkSicilNo.trim()})` : ""}
-                      </div>
-                      <div className="text-[11px] text-slate-500 mt-1">
-                        (İmza)
-                      </div>
-                    </div>
-                    <div>
-                      <div className="font-bold">Mübaşir</div>
-                      <div>
-                        {bailiffName || "Ebru YILMAZ"}
-                        {bailiffSicilNo.trim()
-                          ? ` (${bailiffSicilNo.trim()})`
-                          : ""}
-                      </div>
-                      <div className="text-[11px] text-slate-500 mt-1">
-                        (İmza)
-                      </div>
-                    </div>
-                    <div>
-                      <div className="font-bold">Hakim</div>
-                      <div>
-                        {judgeName || "Kadir SAĞLAM"}
-                        {judgeSicilNo.trim() ? ` (${judgeSicilNo.trim()})` : ""}
-                      </div>
-                      <div className="text-[11px] text-slate-500 mt-1">
-                        (İmza)
-                      </div>
-                    </div>
-                  </div>
-
-                  {activeSelectedExperts.length > 0 && (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 pt-2 text-center text-xs sm:text-[12.5px] border-t border-dashed border-slate-200">
-                      {activeSelectedExperts.map((exp) => (
-                        <div key={exp.id} className="pt-2">
-                          <div className="font-bold">{exp.title}</div>
-                          <div>{exp.fullName}</div>
-                          {exp.sicilNo && (
-                            <div className="text-[11px] text-slate-600">
-                              Sicil No: {exp.sicilNo}
-                            </div>
-                          )}
-                          <div className="text-[11px] text-slate-500 mt-1">
-                            (İmza)
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                {/* 4. ALT 3x3 KENARLIKLI İMZA TABLOSU (ŞABLONDAKİ GİBİ) */}
+                <div className="pt-4">
+                  <table className="w-full border-collapse border border-slate-900 text-xs sm:text-[13px]">
+                    <tbody>
+                      <tr>
+                        <td className="border border-slate-900 p-2 align-top h-16 w-1/3">
+                          Hakim {previewJudgeSicil}
+                        </td>
+                        <td className="border border-slate-900 p-2 align-top h-16 w-1/3">
+                          Zabıt Katibi {previewClerkSicil}
+                        </td>
+                        <td className="border border-slate-900 p-2 align-top h-16 w-1/3">
+                          Mübaşir {previewBailiffSicil}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="border border-slate-900 p-2 align-top h-16 font-medium text-red-800">
+                          {signatureRowExperts[0] || ""}
+                        </td>
+                        <td className="border border-slate-900 p-2 align-top h-16 font-medium text-red-800">
+                          {signatureRowExperts[1] || ""}
+                        </td>
+                        <td className="border border-slate-900 p-2 align-top h-16 font-medium text-red-800">
+                          {signatureRowExperts[2] || ""}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="border border-slate-900 p-2 align-top h-16">
+                          Davacı Vekili
+                        </td>
+                        <td className="border border-slate-900 p-2 align-top h-16">
+                          Davalı Vekili
+                        </td>
+                        <td className="border border-slate-900 p-2 align-top h-16">
+                          &nbsp;
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
 
-                {/* Sayfa Alt Bilgi (Footer) Önizlemesi */}
-                <div className="mt-8 border-t border-slate-400 pt-2.5 flex items-center justify-between text-[11px] text-slate-700">
-                  <span className="font-bold">
-                    Fatsa 2. Sulh Hukuk Mahkemesi {activeRecord.esasNo} Keşif Zaptı
+                {/* 5. SAYFA ALT BİLGİ (FOOTER) ÖNİZLEMESİ */}
+                <div className="mt-8 border-t-2 border-slate-800 pt-2 flex items-center justify-between text-[11px] font-sans text-slate-700">
+                  <span>
+                    Fatsa 2. Sulh Hukuk Mahkemesi – {previewEsasDisplay} – Keşif
+                    Zaptı
                   </span>
-                  <span>Sayfa 1 / 1</span>
+                  <span className="inline-flex h-5 w-6 items-center justify-center bg-slate-900 text-[11px] font-bold text-white">
+                    1
+                  </span>
                 </div>
               </div>
             )}

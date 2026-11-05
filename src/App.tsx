@@ -129,6 +129,7 @@ import {
 import { MultiRouteAdvisorView } from "./components/MultiRouteAdvisorView";
 import { EditInspectionModal } from "./components/EditInspectionModal";
 import { InspectionMinutesView } from "./components/InspectionMinutesView";
+import { DEFAULT_REGISTERED_EXPERTS } from "./services/wordMinutesService";
 import {
   GitHubPublishResult,
   publishProjectToGitHubPagesKsf,
@@ -337,12 +338,12 @@ export default function App() {
       const saved = localStorage.getItem(STORAGE_KEY_REGISTERED_EXPERTS);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch {
       // ignore
     }
-    return [];
+    return DEFAULT_REGISTERED_EXPERTS;
   });
   const [preselectedMinutesRecordId, setPreselectedMinutesRecordId] = useState<
     string | null
