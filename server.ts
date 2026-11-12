@@ -138,6 +138,61 @@ Lütfen hangi dosyaların hangi sırayla gezilmesi gerektiğini, tahmini zaman t
     }
   });
 
+  // Natural Language Conversational Field Assistant Endpoint (Grounded in Real Database)
+  app.post("/api/ai-assistant", async (req, res) => {
+    try {
+      const { query, todayIso, inspectionsSummary, expertsSummary, localAnswer } = req.body || {};
+      if (!query || typeof query !== "string") {
+        return res.status(400).json({ error: "Sorgu metni gerekli." });
+      }
+
+      if (
+        !process.env.GEMINI_API_KEY ||
+        process.env.GEMINI_API_KEY === "MY_GEMINI_API_KEY"
+      ) {
+        return res.json({
+          answer: localAnswer || null,
+          source: "local_engine",
+        });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey: process.env.GEMINI_API_KEY,
+        httpOptions: {
+          headers: {
+            "User-Agent": "aistudio-build",
+          },
+        },
+      });
+
+      const prompt = `Sen Ordu İli Fatsa Adliyesi (Fatsa 2. Sulh Hukuk Mahkemesi) Akıllı Keşif ve Saha Yönetim Sisteminin Yapay Zeka Asistanısın.
+Kullanıcı (Hakim, Zabıt Katibi veya Mübaşir) sana serbest doğal dilde spontane bir soru sordu.
+Yalnızca aşağıdaki gerçek veritabanı özetini ve yerel hesaplama motorunun bulgularını kullanarak, uydurma veri eklemeden, samimi, kurumsal, net ve pratik bir Türkçe yanıt ver (maksimum 4-6 cümle).
+Süre hesaplamalarında: Adliye gidiş-dönüş yol süresi + her keşif dosyası için sahada ortalama 25-30 dakika (çoklu parsel/bağımsız bölüm varsa ek +10 dk) inceleme süresi baz alınır.
+
+Bugünün Tarihi: ${todayIso || ""}
+Kullanıcının Sorusu: "${query}"
+Yerel Hesaplama Motoru Ön Analizi: ${localAnswer || "Yok"}
+Sistemdeki Gerçek Keşif Kayıtları Özeti: ${JSON.stringify(inspectionsSummary || [])}
+Kayıtlı Bilirkişiler Özeti: ${JSON.stringify(expertsSummary || [])}`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.8-flash",
+        contents: prompt,
+      });
+
+      return res.json({
+        answer: response.text || localAnswer || null,
+        source: "gemini",
+      });
+    } catch {
+      return res.json({
+        answer: req.body?.localAnswer || null,
+        source: "local_fallback",
+      });
+    }
+  });
+
   // Multi-Neighborhood / Multi-Parcel Route & Day-by-Day AI Scheduling Advisor Endpoint
   app.post("/api/ai-multi-route-advice", async (req, res) => {
     try {

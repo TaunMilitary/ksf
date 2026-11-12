@@ -628,23 +628,23 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
   return (
     <div className="space-y-4">
       {/* ====================================================================
-          MOR ÜST BAŞLIK ŞERİDİ & ALT SEKME GEÇİŞİ (KEŞİF ZAPTI HAZIRLA / BİLİRKİŞİ YÖNETİMİ)
+          KONTROL MERKEZİ STİLİ ÜST BAŞLIK & ALT SEKME GEÇİŞİ (KEŞİF ZAPTI HAZIRLA / BİLİRKİŞİ YÖNETİMİ)
          ==================================================================== */}
-      <div className="rounded-2xl border border-purple-300 bg-gradient-to-r from-purple-950 via-purple-900 to-indigo-950 p-4 sm:p-5 text-white shadow-lg">
+      <div className="app-card p-4 sm:p-5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="space-y-1">
-            <div className="inline-flex items-center gap-2 rounded-md bg-purple-500/25 border border-purple-400/40 px-2.5 py-0.5 text-[11px] font-bold text-purple-200">
-              <FileText className="h-3.5 w-3.5 text-purple-300" />
+            <div className="inline-flex items-center gap-2 rounded-md bg-[#246B73]/12 px-2.5 py-0.5 text-[11px] font-bold text-[#246B73]">
+              <FileText className="h-3.5 w-3.5" />
               <span>
                 T.C. FATSA 2. SULH HUKUK MAHKEMESİ · RESMİ KEŞİF ZAPTI ŞABLONU & WORD SİSTEMİ
               </span>
             </div>
-            <h1 className="text-base sm:text-xl font-bold tracking-tight text-white">
+            <h1 className="text-base sm:text-xl font-bold tracking-tight text-slate-900">
               Keşif Zaptı Hazırla & Mahkeme Bilirkişi Rehberi
             </h1>
-            <p className="text-xs text-purple-200/90 max-w-3xl">
+            <p className="text-xs text-slate-500 max-w-3xl">
               Seçtiğiniz keşiflerin zabıtlarını resmi mahkeme şablonuna birebir uygun olarak görevli Hakim, Katip, Mübaşir ve Bilirkişi kimlik/açıklama metinleriyle otomatik oluşturun; alt bilgisinde{" "}
-              <strong className="text-white">
+              <strong className="text-slate-800">
                 &ldquo;Fatsa 2. Sulh Hukuk Mahkemesi – #DosyaNo – Keşif Zaptı&rdquo;
               </strong>{" "}
               ve sayfa numarası bulunan düzenli <strong>Word (.doc)</strong> belgesi olarak dışarı aktarın.
@@ -657,11 +657,11 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
               onClick={() => setSubTab("zapt")}
               className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition-all ${
                 subTab === "zapt"
-                  ? "bg-white text-purple-950 shadow-md"
-                  : "border border-purple-400/40 bg-purple-900/60 text-purple-100 hover:bg-purple-800"
+                  ? "bg-[#246B73] text-white shadow-xs"
+                  : "border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
               }`}
             >
-              <FileText className="h-4 w-4 text-purple-600" />
+              <FileText className="h-4 w-4" />
               <span>1. Keşif Zaptı Hazırla & Word İndir</span>
             </button>
             <button
@@ -669,11 +669,11 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
               onClick={() => setSubTab("bilirkisiler")}
               className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition-all ${
                 subTab === "bilirkisiler"
-                  ? "bg-white text-purple-950 shadow-md"
-                  : "border border-purple-400/40 bg-purple-900/60 text-purple-100 hover:bg-purple-800"
+                  ? "bg-[#1B2733] text-white shadow-xs"
+                  : "border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
               }`}
             >
-              <Users className="h-4 w-4 text-purple-600" />
+              <Users className="h-4 w-4 text-[#63B5B0]" />
               <span>
                 2. Bilirkişi Ekle & Bilgilerini Yönet ({registeredExperts.length} Kayıtlı)
               </span>
@@ -683,12 +683,12 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
       </div>
 
       {feedbackBanner && (
-        <div className="flex items-center justify-between gap-2 rounded-xl border border-purple-300 bg-purple-50 px-4 py-3 text-xs font-bold text-purple-950 shadow-xs">
+        <div className="flex items-center justify-between gap-2 rounded-xl border border-[#246B73]/30 bg-[#246B73]/10 px-4 py-3 text-xs font-bold text-slate-900 shadow-xs">
           <span>{feedbackBanner}</span>
           <button
             type="button"
             onClick={() => setFeedbackBanner(null)}
-            className="text-purple-700 hover:text-purple-950"
+            className="text-[#246B73] hover:text-slate-950"
           >
             ✕
           </button>
@@ -701,10 +701,10 @@ export const InspectionMinutesView: React.FC<InspectionMinutesViewProps> = ({
       {subTab === "bilirkisiler" && (
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-12 items-start">
           {/* Sol 5 Sütun: Bilirkişi Ekle / Düzenle Formu */}
-          <div className="lg:col-span-5 rounded-2xl border border-purple-200 bg-white p-5 shadow-xs space-y-4">
+          <div className="lg:col-span-5 app-card p-5 space-y-4">
             <div className="border-b border-slate-200 pb-3 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Users className="h-5 w-5 text-purple-600" />
+                <Users className="h-5 w-5 text-[#246B73]" />
                 <h2 className="text-sm sm:text-base font-bold text-slate-900">
                   {editingExpertId
                     ? "Bilirkişi Bilgilerini & Zapt Açıklamasını Düzenle"

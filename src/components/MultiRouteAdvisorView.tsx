@@ -983,37 +983,37 @@ export const MultiRouteAdvisorView: React.FC<MultiRouteAdvisorViewProps> = ({
 
   return (
     <div className="space-y-5">
-      {/* Üst Başlık ve Açıklama Kartı */}
-      <div className="rounded-xl border border-emerald-200 bg-gradient-to-r from-slate-900 via-slate-800 to-emerald-950 p-4 sm:p-6 text-white shadow-sm">
+      {/* Üst Başlık ve Açıklama Kartı (Control Center Style) */}
+      <div className="app-card p-4 sm:p-5">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="space-y-1">
-            <div className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500/20 border border-emerald-400/30 px-2.5 py-0.5 text-[11px] font-bold text-emerald-300">
+            <div className="inline-flex items-center gap-1.5 rounded-md bg-[#246B73]/12 px-2.5 py-0.5 text-[11px] font-bold text-[#246B73]">
               <Sparkles className="h-3.5 w-3.5" />
               <span>AKILLI ÇOKLU MAHALLE & PARSEL ROTA PLANLAYICI</span>
             </div>
-            <h1 className="text-base sm:text-xl font-bold tracking-tight text-white">
+            <h1 className="text-base sm:text-xl font-bold tracking-tight text-slate-900">
               Yapay Zeka Rota Önerisi & Günlere Göre Keşif Tavsiyesi
             </h1>
-            <p className="text-xs text-slate-300 max-w-3xl leading-relaxed">
+            <p className="text-xs text-slate-500 max-w-3xl leading-relaxed">
               Birden fazla mahalle adı, ada/parsel numarası veya dosya listesi girdiğinizde; sistem TKGM konumlarını ve Fatsa Adliyesi mesafelerini hesaplar, <strong>mevcut girdiğiniz keşif günleriyle karşılaştırır</strong> ve hangi dosyaların hangi gün ve sırayla gezilmesi gerektiğini tavsiye eder.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <div className="rounded-lg border border-slate-700 bg-slate-800/90 px-3 py-2 text-xs">
-              <span className="text-slate-400 block text-[10px]">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs">
+              <span className="text-slate-400 font-bold block text-[10px]">
                 MEVCUT KAYITLI KEŞİF
               </span>
-              <span className="font-mono font-bold text-emerald-400">
+              <span className="font-mono font-bold text-[#246B73]">
                 {existingInspections.length} Dosya (
                 {new Set(existingInspections.map((r) => r.date)).size} Gün)
               </span>
             </div>
-            <div className="rounded-lg border border-slate-700 bg-slate-800/90 px-3 py-2 text-xs">
-              <span className="text-slate-400 block text-[10px]">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs">
+              <span className="text-slate-400 font-bold block text-[10px]">
                 ROTA HAVUZUNDAKİ NOKTA
               </span>
-              <span className="font-mono font-bold text-amber-400">
+              <span className="font-mono font-bold text-[#D69A35]">
                 {candidates.length} Mahalle / Parsel
               </span>
             </div>
@@ -1022,23 +1022,23 @@ export const MultiRouteAdvisorView: React.FC<MultiRouteAdvisorViewProps> = ({
       </div>
 
       {statusBanner && (
-        <div className="flex items-center justify-between rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2.5 text-xs font-semibold text-emerald-950">
+        <div className="flex items-center justify-between rounded-xl border border-[#246B73]/30 bg-[#246B73]/10 px-4 py-2.5 text-xs font-semibold text-slate-900">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+            <CheckCircle2 className="h-4 w-4 text-[#16845B] shrink-0" />
             <span>{statusBanner}</span>
           </div>
           <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={onSwitchToAgenda}
-              className="rounded bg-emerald-700 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-800"
+              className="rounded-xl bg-[#246B73] px-3 py-1 text-[11px] font-bold text-white hover:opacity-95"
             >
               Ajandayı Gör &rarr;
             </button>
             <button
               type="button"
               onClick={() => setStatusBanner(null)}
-              className="text-emerald-800 hover:underline"
+              className="text-[#246B73] hover:underline font-bold"
             >
               Kapat
             </button>
@@ -1049,7 +1049,7 @@ export const MultiRouteAdvisorView: React.FC<MultiRouteAdvisorViewProps> = ({
       {/* BÖLÜM 1: ÇOKLU MAHALLE & PARSEL GİRİŞ PANELLERİ */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-12 items-start">
         {/* Sol 7 Sütun: Form ile Ekleme + Hızlı Mahalle Seçimi */}
-        <div className="lg:col-span-7 rounded-xl border border-slate-200 bg-white p-4 sm:p-5 space-y-4">
+        <div className="lg:col-span-7 app-card p-4 sm:p-5 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-200 pb-3">
             <div>
               <h2 className="text-sm sm:text-base font-bold text-slate-900">

@@ -518,11 +518,11 @@ export const StatisticsDashboardView: React.FC<StatisticsDashboardViewProps> = (
       {/* ====================================================================
           1. ÜST KONTROL VE FİLTRE PANELİ (AYLIK / GÜNLÜK GEÇİŞİ, YIL, AY, İLÇE)
          ==================================================================== */}
-      <div className="rounded-xl border border-slate-200 bg-white p-5">
+      <div className="app-card p-4 sm:p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between border-b border-slate-200 pb-4">
           <div className="space-y-1">
-            <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700">
-              <BarChart3 className="h-4 w-4" />
+            <div className="inline-flex items-center gap-1.5 rounded-md bg-[#246B73]/12 px-2.5 py-0.5 text-[11px] font-bold text-[#246B73]">
+              <BarChart3 className="h-3.5 w-3.5" />
               <span>T.C. FATSA SULH HUKUK MAHKEMESİ · ANALİTİK KEŞİF RAPORLAMA PANELİ</span>
             </div>
             <h1 className="text-lg sm:text-xl font-bold tracking-tight text-slate-900">
@@ -535,16 +535,16 @@ export const StatisticsDashboardView: React.FC<StatisticsDashboardViewProps> = (
 
           {/* Aylık / Günlük Görünüm Anahtarı */}
           <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <div className="inline-flex items-center rounded-lg bg-slate-100 p-1">
+            <div className="inline-flex items-center rounded-xl bg-slate-100 p-1">
               <button
                 type="button"
                 onClick={() => {
                   setGranularity("monthly");
                   setSelectedBucketKey(null);
                 }}
-                className={`rounded-md px-3.5 py-2 text-xs font-bold transition-colors whitespace-nowrap ${
+                className={`rounded-lg px-3.5 py-2 text-xs font-bold transition-colors whitespace-nowrap ${
                   granularity === "monthly"
-                    ? "bg-slate-900 text-white shadow-xs"
+                    ? "bg-[#246B73] text-white shadow-xs"
                     : "text-slate-700 hover:text-slate-900"
                 }`}
               >
@@ -556,9 +556,9 @@ export const StatisticsDashboardView: React.FC<StatisticsDashboardViewProps> = (
                   setGranularity("daily");
                   setSelectedBucketKey(null);
                 }}
-                className={`rounded-md px-3.5 py-2 text-xs font-bold transition-colors whitespace-nowrap ${
+                className={`rounded-lg px-3.5 py-2 text-xs font-bold transition-colors whitespace-nowrap ${
                   granularity === "daily"
-                    ? "bg-slate-900 text-white shadow-xs"
+                    ? "bg-[#246B73] text-white shadow-xs"
                     : "text-slate-700 hover:text-slate-900"
                 }`}
               >
@@ -577,7 +577,7 @@ export const StatisticsDashboardView: React.FC<StatisticsDashboardViewProps> = (
                           "2026-11"
                   )
                 }
-                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-bold text-white hover:bg-emerald-700 whitespace-nowrap"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-[#16845B] px-3.5 py-2 text-xs font-bold text-white hover:opacity-95 whitespace-nowrap shadow-xs"
               >
                 <FileSpreadsheet className="h-4 w-4" />
                 <span>Aylık Excel Raporu Al</span>
@@ -601,7 +601,7 @@ export const StatisticsDashboardView: React.FC<StatisticsDashboardViewProps> = (
                     setSelectedYear(e.target.value);
                     setSelectedBucketKey(null);
                   }}
-                  className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-900 focus:border-emerald-600 focus:outline-none"
+                  className="rounded-xl border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-900 focus:border-[#246B73] focus:outline-none"
                 >
                   <option value="ALL">Tüm Yıllar</option>
                   {availableYears.map((y) => (

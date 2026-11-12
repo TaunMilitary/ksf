@@ -186,12 +186,20 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   }, [activeDayRecords]);
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
       {/* Left 8 Columns: Monthly Calendar Grid */}
-      <div className="lg:col-span-8 rounded-xl border border-slate-200 bg-white p-5">
+      <div className="lg:col-span-8 app-card p-4 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-4">
           <div>
-            <h2 className="text-lg font-bold text-slate-900">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-[#246B73]/12 px-2.5 py-0.5 text-[11px] font-bold text-[#246B73]">
+                <span>📅 Aylık Keşif Takvimi</span>
+              </span>
+              <span className="text-xs font-mono text-slate-500">
+                Günlük Yoğunluk · Hava Durumu · Excel Çıktısı
+              </span>
+            </div>
+            <h2 className="text-base sm:text-lg font-bold text-slate-900 mt-1">
               {MONTH_NAMES_TR[currentMonth]} {currentYear} Keşif Takvimi
             </h2>
             <p className="text-xs text-slate-500">
@@ -207,16 +215,16 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     `${currentYear}-${String(currentMonth + 1).padStart(2, "0")}`
                   )
                 }
-                className="flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-900 hover:bg-emerald-100 whitespace-nowrap"
+                className="flex items-center gap-1.5 rounded-xl bg-[#16845B] px-3 py-1.5 text-xs font-bold text-white hover:opacity-95 whitespace-nowrap shadow-xs"
                 title={`${MONTH_NAMES_TR[currentMonth]} ${currentYear} yapılan keşifler Excel raporunu aç`}
               >
-                <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-700" />
+                <FileSpreadsheet className="h-3.5 w-3.5" />
                 <span>{MONTH_NAMES_TR[currentMonth]} Ayı Excel Raporu</span>
               </button>
             )}
             <button
               onClick={handlePrevMonth}
-              className="rounded-lg border border-slate-200 p-2 text-slate-700 hover:bg-slate-50"
+              className="rounded-xl border border-slate-200 p-2 text-slate-700 hover:bg-slate-50"
               aria-label="Önceki Ay"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -228,13 +236,13 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 setCurrentMonth(now.getMonth());
                 onSelectDate(todayStr);
               }}
-              className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 whitespace-nowrap shrink-0"
+              className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 whitespace-nowrap shrink-0"
             >
               Bugün
             </button>
             <button
               onClick={handleNextMonth}
-              className="rounded-lg border border-slate-200 p-2 text-slate-700 hover:bg-slate-50"
+              className="rounded-xl border border-slate-200 p-2 text-slate-700 hover:bg-slate-50"
               aria-label="Sonraki Ay"
             >
               <ChevronRight className="h-4 w-4" />
@@ -258,7 +266,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               return (
                 <div
                   key={`empty-${idx}`}
-                  className="min-h-[92px] rounded-lg bg-slate-50/60"
+                  className="min-h-[92px] rounded-xl bg-slate-50/60"
                 />
               );
             }
@@ -273,11 +281,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               <button
                 key={cell.dateStr}
                 onClick={() => onSelectDate(cell.dateStr!)}
-                className={`group flex min-h-[92px] flex-col justify-between rounded-lg border p-2 text-left transition-all ${
+                className={`group flex min-h-[92px] flex-col justify-between rounded-xl border p-2 text-left transition-all ${
                   isSelected
-                    ? "border-emerald-600 bg-emerald-50/40 ring-2 ring-emerald-500/20"
+                    ? "border-[#246B73] bg-[#246B73]/8 ring-2 ring-[#246B73]/20"
                     : count > 0
-                    ? "border-slate-200 bg-white hover:border-emerald-400"
+                    ? "border-slate-200 bg-white hover:border-[#246B73]"
                     : "border-slate-100 bg-white hover:border-slate-300"
                 }`}
               >
@@ -286,9 +294,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     <span
                       className={`inline-flex h-6 w-6 items-center justify-center rounded-md text-xs font-semibold tabular-nums ${
                         isToday
-                          ? "bg-slate-900 text-white"
+                          ? "bg-[#1B2733] text-white"
                           : isSelected
-                          ? "text-emerald-800 font-bold"
+                          ? "text-[#246B73] font-bold"
                           : "text-slate-700"
                       }`}
                     >
@@ -302,7 +310,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                       className={`rounded px-1.5 py-0.5 text-[11px] font-semibold tabular-nums ${
                         count >= 3
                           ? "bg-amber-100 text-amber-900"
-                          : "bg-emerald-100 text-emerald-900"
+                          : "bg-[#246B73]/12 text-[#246B73]"
                       }`}
                     >
                       {count} Keşif
@@ -321,7 +329,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                             r.status === "iptal_edildi"
                               ? "line-through text-slate-400"
                               : r.status === "yapildi"
-                              ? "text-emerald-800"
+                              ? "text-[#16845B]"
                               : "text-slate-700"
                           }`}
                         >
@@ -332,7 +340,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                               ? "🏠"
                               : cMeta.icon}
                           </span>{" "}
-                          <span className="font-mono text-emerald-700">{r.time}</span>{" "}
+                          <span className="font-mono text-[#246B73]">{r.time}</span>{" "}
                           {r.subjectType === "arac" && r.vehicleInfo?.plateNo
                             ? r.vehicleInfo.plateNo
                             : r.neighborhood.replace(" Mahallesi", "")}
@@ -357,14 +365,14 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       </div>
 
       {/* Right 4 Columns: Selected Day Detail Panel */}
-      <div className="lg:col-span-4 flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-5">
+      <div className="lg:col-span-4 flex flex-col justify-between app-card p-5">
         <div>
           <div className="flex items-start justify-between gap-2 border-b border-slate-200 pb-4">
             <div>
-              <div className="text-xs font-medium text-emerald-700">
+              <span className="inline-flex items-center gap-1 rounded-md bg-[#246B73]/12 px-2 py-0.5 text-[10px] font-bold uppercase text-[#246B73]">
                 SEÇİLİ GÜN DETAYI
-              </div>
-              <h3 className="mt-0.5 text-base font-bold text-slate-900">
+              </span>
+              <h3 className="mt-1 text-base font-bold text-slate-900">
                 {selectedDate
                   ? formatLongDateTR(selectedDate)
                   : "Tarih Seçilmedi"}
@@ -373,7 +381,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             {selectedDate && (
               <button
                 onClick={() => onAddForDate(selectedDate)}
-                className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 whitespace-nowrap shrink-0"
+                className="flex items-center gap-1.5 rounded-xl bg-[#246B73] px-3 py-1.5 text-xs font-bold text-white hover:opacity-95 whitespace-nowrap shrink-0"
               >
                 <Plus className="h-3.5 w-3.5" />
                 Bu Güne Ekle

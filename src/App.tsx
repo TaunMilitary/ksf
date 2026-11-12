@@ -3630,28 +3630,21 @@ export default function App() {
           TOP BAR CONTRACT: Responsive 3 Zones + Theme Switcher & Notification Center
          ==================================================================== */}
       <header className="sticky top-0 z-30 flex items-center justify-between gap-2 border-b border-slate-800 bg-[#101820] px-3 py-2.5 text-white sm:px-5 sm:gap-4">
-        {/* Zone 1: Brand Title with district coverage badge */}
-        <div className="flex items-center gap-2 truncate">
-          <a
-            href="#top"
-            onClick={(e) => {
-              e.preventDefault();
-              setActiveTab("ana_sayfa");
-            }}
-            className="text-sm sm:text-base font-bold tracking-tight text-white truncate"
-          >
-            Fatsa, Çamaş & Çatalpınar Keşif
-          </a>
-          <span className="hidden xl:inline-block rounded bg-[#246B73]/30 border border-[#63B5B0]/30 px-2 py-0.5 text-[11px] font-medium text-[#63B5B0]">
-            Sulh Hukuk · Mobil CBS
-          </span>
-        </div>
+        {/* Mobile Quick Home Button (only on small screens since top-left title is removed) */}
+        <button
+          type="button"
+          onClick={() => setActiveTab("ana_sayfa")}
+          className="flex md:hidden items-center gap-1.5 rounded-lg bg-[#246B73]/30 border border-[#63B5B0]/30 px-2.5 py-1 text-xs font-bold text-white"
+        >
+          <LayoutDashboard className="h-3.5 w-3.5 text-[#63B5B0]" />
+          <span>Kontrol Merkezi</span>
+        </button>
 
-        {/* Zone 2: Desktop Navigation Links */}
-        <nav className="hidden md:flex items-center gap-2.5 lg:gap-3.5 text-xs font-medium text-slate-300 overflow-x-auto">
+        {/* Desktop Navigation Links */}
+        <nav className="hidden md:flex items-center gap-2.5 lg:gap-4 text-xs font-medium text-slate-300 overflow-x-auto">
           <button
             onClick={() => setActiveTab("ana_sayfa")}
-            className={`flex items-center gap-1 py-1 transition-colors whitespace-nowrap shrink-0 ${
+            className={`flex items-center gap-1.5 py-1 transition-colors whitespace-nowrap shrink-0 ${
               activeTab === "ana_sayfa"
                 ? "text-white font-bold underline decoration-[#63B5B0] decoration-2 underline-offset-8"
                 : "hover:text-white"
@@ -4344,24 +4337,33 @@ export default function App() {
         {activeTab === "yeni_kesif" && (
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-12 items-start">
             {/* Left Column: Form */}
-            <div className="lg:col-span-6 rounded-xl border border-slate-200 bg-white p-4 sm:p-6">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
+            <div className="lg:col-span-6 app-card p-4 sm:p-6">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3.5">
                 <div>
-                  <h1 className="text-base sm:text-lg font-bold text-slate-900">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 rounded-md bg-[#246B73]/12 px-2.5 py-0.5 text-[11px] font-bold text-[#246B73]">
+                      <Plus className="h-3.5 w-3.5" />
+                      <span>Yeni Keşif & Taşınmaz Kaydı</span>
+                    </span>
+                    <span className="text-xs font-mono text-slate-500">
+                      TKGM MEGSİS · Çoklu Parsel · Adres · Araç
+                    </span>
+                  </div>
+                  <h1 className="text-base sm:text-lg font-bold text-slate-900 mt-1">
                     Yeni Keşif & Taşınmaz (Ada/Parsel) Planla
                   </h1>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Mahalle ve Ada/Parsel numarasını kendiniz girdiğinizde TKGM MEGSİS üzerinden parsel sınırları otomatik çekilip haritada çizilir
+                    Mahalle ve Ada/Parsel numarasını girdiğinizde TKGM MEGSİS üzerinden parsel sınırları otomatik çekilip haritada çizilir
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => handleOpenNewInspectionTab()}
-                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+                  className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-100"
                   title="Parsel ve form alanlarını sıfırla"
                 >
                   <RotateCcw className="h-3 w-3" />
-                  <span>Parsel Bilgilerini Temizle</span>
+                  <span>Formu Temizle</span>
                 </button>
               </div>
 
@@ -6022,13 +6024,13 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setActiveTab("ajanda")}
-                    className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    className="rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                   >
                     Ajandaya Dön
                   </button>
                   <button
                     type="submit"
-                    className="flex items-center gap-1.5 rounded-lg bg-[#10b981] px-4 py-2 text-xs font-bold text-slate-950 shadow-xs hover:bg-emerald-400 whitespace-nowrap"
+                    className="flex items-center gap-1.5 rounded-xl bg-[#246B73] px-4 py-2.5 text-xs font-bold text-white shadow-xs hover:opacity-95 whitespace-nowrap"
                   >
                     <Plus className="h-4 w-4" />
                     {subjectType === "arac"
@@ -6045,9 +6047,13 @@ export default function App() {
 
             {/* Right Column: Map Picker with Multi-Parcel Polygon Preview & Clickable Nearby Suggestions */}
             <div className="lg:col-span-6 space-y-3">
-              <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+              <div className="app-card p-4 sm:p-5 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
+                    <span className="inline-flex items-center gap-1 rounded-md bg-[#246B73]/12 px-2 py-0.5 text-[10px] font-bold text-[#246B73] mb-1">
+                      <MapPin className="h-3 w-3" />
+                      <span>Canlı CBS & TKGM Harita Önizlemesi</span>
+                    </span>
                     <h2 className="text-xs sm:text-sm font-bold text-slate-900">
                       {subjectType === "arac"
                         ? `Araç İnceleme Konumu & Güzergah Haritası (${formDistrict})`
@@ -6063,7 +6069,7 @@ export default function App() {
                         : "Dosyaya eklenen tüm parsellerin TKGM sınırları haritada birlikte çizilir"}
                     </p>
                   </div>
-                  <span className="font-mono text-xs font-semibold text-emerald-700 tabular-nums">
+                  <span className="rounded-lg bg-[#246B73]/10 px-2.5 py-1 font-mono text-xs font-bold text-[#246B73] tabular-nums">
                     {distanceKm} km · {durationMin} dk
                   </span>
                 </div>
@@ -6181,8 +6187,95 @@ export default function App() {
         {/* VIEW 2: AJANDA GÖRÜNÜMÜ */}
         {activeTab === "ajanda" && (
           <div className="space-y-4">
-            {/* Toolbar: Search, District Filter, Status Filter & Actions */}
-            <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3.5 sm:p-4">
+            {/* Toolbar: Control Center Style Header + Search, District Filter, Status Filter & Actions */}
+            <div className="app-card p-4 sm:p-5 space-y-3.5">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 rounded-md bg-[#246B73]/12 px-2.5 py-0.5 text-[11px] font-bold text-[#246B73]">
+                      <CalendarIcon className="h-3.5 w-3.5" />
+                      <span>Keşif Ajandası & Saha İş Akışı</span>
+                    </span>
+                    <span className="text-xs font-mono text-slate-500">
+                      Toplam {inspections.length} Dosya · 8 Aşamalı Saha Takibi
+                    </span>
+                  </div>
+                  <h1 className="text-base sm:text-lg font-bold text-slate-900 mt-1">
+                    Günlük Keşif Programı & Dosya Yönetimi
+                  </h1>
+                </div>
+
+                {/* Right Action Buttons */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsAiAssistantOpen(true)}
+                    className="flex items-center gap-1.5 rounded-xl bg-[#246B73] px-3 py-1.5 text-xs font-bold text-white hover:opacity-95 whitespace-nowrap shadow-xs"
+                    title="Doğal Türkçe sorgularla keşif asistanına soru sor"
+                  >
+                    <Sparkles className="h-3.5 w-3.5 text-emerald-200" />
+                    <span>YZ Asistan</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("kesif_zapti")}
+                    className="flex items-center gap-1.5 rounded-xl bg-[#1B2733] px-3 py-1.5 text-xs font-bold text-white hover:opacity-95 whitespace-nowrap shadow-xs"
+                    title="Seçili keşiflerin zabıtlarını hazırla ve Word (.doc) belgesi olarak dışa aktar"
+                  >
+                    <FileText className="h-3.5 w-3.5 text-[#63B5B0]" />
+                    <span>Keşif Zaptı Hazırla</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("bilirkisiler")}
+                    className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-bold text-slate-800 hover:bg-slate-100 whitespace-nowrap"
+                    title="Mahkemede görev alan bilirkişileri ve zapt açıklamalarını ekle/düzenle"
+                  >
+                    <Users className="h-3.5 w-3.5 text-[#246B73]" />
+                    <span>Bilirkişi Ekle ({registeredExperts.length})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("istatistikler")}
+                    className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-800 hover:bg-slate-50 whitespace-nowrap"
+                    title="Aylık ve günlük yapılan keşif, parsel sayısı ve kilometre istatistik grafiklerini aç"
+                  >
+                    <BarChart3 className="h-3.5 w-3.5 text-[#397FA5]" />
+                    <span>İstatistik & Grafikler</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsExcelModalOpen(true)}
+                    className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-800 hover:bg-slate-50 whitespace-nowrap"
+                    title="Aylık yapılan keşifleri (Dosya No, Keşif Tarihi, Katılan Hakim, Katip ve Mübaşir isimleriyle) Excel (.xls) olarak indir"
+                  >
+                    <FileSpreadsheet className="h-3.5 w-3.5 text-[#16845B]" />
+                    <span>Aylık Excel Raporu</span>
+                  </button>
+                  <button
+                    onClick={() => setIsPdfModalOpen(true)}
+                    className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 whitespace-nowrap"
+                  >
+                    <FileDown className="h-3.5 w-3.5 text-[#246B73]" />
+                    <span>PDF Çıktısı</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("ai_rota")}
+                    className="flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-bold text-[#246B73] hover:bg-slate-100 whitespace-nowrap"
+                  >
+                    <Sparkles className="h-3.5 w-3.5 text-[#246B73]" />
+                    <span>YZ Rota & Gün Tavsiyesi</span>
+                  </button>
+                  <button
+                    onClick={() => handleOpenNewInspectionTab()}
+                    className="flex items-center gap-1 rounded-xl bg-[#16845B] px-3 py-1.5 text-xs font-bold text-white hover:opacity-95 whitespace-nowrap"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>Yeni Keşif</span>
+                  </button>
+                </div>
+              </div>
+
               <div className="flex flex-col gap-2.5 md:flex-row md:items-center md:justify-between">
                 {/* Search & District Filter */}
                 <div className="flex flex-1 flex-wrap items-center gap-2">
@@ -6193,7 +6286,7 @@ export default function App() {
                       value={agendaFilterText}
                       onChange={(e) => setAgendaFilterText(e.target.value)}
                       placeholder="Esas No, Ada/Parsel, Mahalle veya Not ara..."
-                      className="w-full rounded-lg border border-slate-300 pl-8 pr-3 py-1.5 text-xs text-slate-900 focus:border-emerald-600 focus:outline-none"
+                      className="w-full rounded-xl border border-slate-300 pl-8 pr-3 py-1.5 text-xs text-slate-900 focus:border-[#246B73] focus:outline-none"
                     />
                   </div>
 
@@ -6201,7 +6294,7 @@ export default function App() {
                   <select
                     value={agendaDistrictFilter}
                     onChange={(e) => setAgendaDistrictFilter(e.target.value)}
-                    className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-800 focus:border-emerald-600 focus:outline-none shrink-0"
+                    className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-800 focus:border-[#246B73] focus:outline-none shrink-0"
                   >
                     <option value="Tümü">Tüm İlçeler ({inspections.length})</option>
                     <option value="Fatsa">Fatsa ({districtCounts.fatsa})</option>
@@ -6212,7 +6305,7 @@ export default function App() {
                   <select
                     value={agendaCaseFilter}
                     onChange={(e) => setAgendaCaseFilter(e.target.value)}
-                    className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:border-emerald-600 focus:outline-none shrink-0"
+                    className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:border-[#246B73] focus:outline-none shrink-0"
                   >
                     <option value="Tümü">Tüm Dava Türleri</option>
                     {CASE_TYPES.map((ct) => (
@@ -6223,7 +6316,7 @@ export default function App() {
                   </select>
 
                   {/* Tarih Aralığı Filtresi */}
-                  <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px]">
+                  <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px]">
                     <span className="font-semibold text-slate-500">Tarih:</span>
                     <input
                       type="date"
@@ -6255,76 +6348,6 @@ export default function App() {
                     )}
                   </div>
                 </div>
-
-                {/* Right Action Buttons */}
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsAiAssistantOpen(true)}
-                    className="flex items-center gap-1.5 rounded-lg bg-[#246B73] px-3 py-1.5 text-xs font-bold text-white hover:opacity-95 whitespace-nowrap shadow-xs"
-                    title="Doğal Türkçe sorgularla keşif asistanına soru sor"
-                  >
-                    <Sparkles className="h-3.5 w-3.5 text-emerald-200" />
-                    <span>YZ Asistan</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("kesif_zapti")}
-                    className="flex items-center gap-1.5 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-purple-700 whitespace-nowrap shadow-xs"
-                    title="Seçili keşiflerin zabıtlarını hazırla ve Word (.doc) belgesi olarak dışa aktar"
-                  >
-                    <FileText className="h-3.5 w-3.5 text-purple-200" />
-                    <span>Keşif Zaptı Hazırla</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("bilirkisiler")}
-                    className="flex items-center gap-1.5 rounded-lg border border-purple-300 bg-purple-50 px-2.5 py-1.5 text-xs font-bold text-purple-950 hover:bg-purple-100 whitespace-nowrap"
-                    title="Mahkemede görev alan bilirkişileri ve zapt açıklamalarını ekle/düzenle"
-                  >
-                    <Users className="h-3.5 w-3.5 text-purple-700" />
-                    <span>Bilirkişi Ekle ({registeredExperts.length})</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("istatistikler")}
-                    className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-800 whitespace-nowrap shadow-xs"
-                    title="Aylık ve günlük yapılan keşif, parsel sayısı ve kilometre istatistik grafiklerini aç"
-                  >
-                    <BarChart3 className="h-3.5 w-3.5 text-emerald-400" />
-                    <span>İstatistik & Grafikler</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsExcelModalOpen(true)}
-                    className="flex items-center gap-1.5 rounded-lg border border-emerald-400 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-950 hover:bg-emerald-100 whitespace-nowrap shadow-2xs"
-                    title="Aylık yapılan keşifleri (Dosya No, Keşif Tarihi, Katılan Hakim, Katip ve Mübaşir isimleriyle) Excel (.xls) olarak indir"
-                  >
-                    <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-700" />
-                    <span>Aylık Excel Raporu</span>
-                  </button>
-                  <button
-                    onClick={() => setIsPdfModalOpen(true)}
-                    className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 whitespace-nowrap"
-                  >
-                    <FileDown className="h-3.5 w-3.5 text-emerald-600" />
-                    <span>PDF Çıktısı</span>
-                  </button>
-                  <button
-                    onClick={() => setActiveTab("ai_rota")}
-                    className="flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs font-bold text-emerald-900 hover:bg-emerald-100 whitespace-nowrap"
-                  >
-                    <Sparkles className="h-3.5 w-3.5 text-emerald-600" />
-                    <span>YZ Rota & Gün Tavsiyesi</span>
-                  </button>
-                  <button
-                    onClick={() => handleOpenNewInspectionTab()}
-                    className="flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 whitespace-nowrap"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    <span>Yeni Keşif</span>
-                  </button>
-                </div>
               </div>
 
               {/* Status Filter Scrollable Bar (8 Durum + Tümü) */}
@@ -6345,7 +6368,7 @@ export default function App() {
                   <button
                     key={tab.key}
                     onClick={() => setAgendaStatusFilter(tab.key)}
-                    className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                    className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
                       agendaStatusFilter === tab.key
                         ? "bg-[#246B73] text-white"
                         : "bg-slate-100 text-slate-700 hover:bg-slate-200"
@@ -6359,7 +6382,7 @@ export default function App() {
 
             {/* Agenda Group Cards */}
             {agendaGroups.length === 0 ? (
-              <div className="rounded-xl border border-slate-200 bg-white p-8 text-center space-y-2.5">
+              <div className="app-card p-8 text-center space-y-2.5">
                 <Compass className="mx-auto h-7 w-7 text-slate-400" />
                 <h3 className="text-sm sm:text-base font-bold text-slate-900">
                   Kriterlere uygun keşif kaydı bulunamadı
@@ -6374,7 +6397,7 @@ export default function App() {
                     setAgendaStatusFilter("Tümü");
                     setAgendaCaseFilter("Tümü");
                   }}
-                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700"
+                  className="rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700"
                 >
                   Filtreleri Sıfırla
                 </button>
@@ -6386,16 +6409,16 @@ export default function App() {
                   return (
                     <div
                       key={group.date}
-                      className="overflow-hidden rounded-xl border border-slate-200 bg-white"
+                      className="overflow-hidden app-card"
                     >
                       {/* Day Group Header (Wrap-friendly on mobile) */}
-                      <div className="flex flex-col gap-2 border-b border-slate-200 bg-slate-900 p-3 sm:px-5 sm:py-3.5 text-white sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex flex-col gap-2 border-b border-slate-200 bg-[#1B2733] p-3 sm:px-5 sm:py-3.5 text-white sm:flex-row sm:items-center sm:justify-between">
                         <div className="flex flex-wrap items-center gap-2">
-                          <CalendarIcon className="h-4 w-4 text-emerald-400 shrink-0" />
+                          <CalendarIcon className="h-4 w-4 text-[#63B5B0] shrink-0" />
                           <h2 className="text-xs sm:text-sm font-bold tracking-tight">
                             {formatLongDateTR(group.date)}
                           </h2>
-                          <span className="text-[11px] font-medium text-emerald-300">
+                          <span className="text-[11px] font-medium text-[#63B5B0]">
                             ({group.records.length} Dosya)
                           </span>
                           {firstWeather && (
@@ -6409,12 +6432,12 @@ export default function App() {
 
                         <div className="flex flex-wrap items-center gap-2 text-xs">
                           <span className="font-mono text-slate-300 text-[11px] tabular-nums">
-                            Gidiş-Dönüş: <strong className="text-emerald-400">~{group.totalDailyKm} km</strong>
+                            Gidiş-Dönüş: <strong className="text-[#63B5B0]">~{group.totalDailyKm} km</strong>
                           </span>
                           <button
                             type="button"
                             onClick={() => setShareRouteDate(group.date)}
-                            className="flex items-center gap-1 rounded bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-500 whitespace-nowrap"
+                            className="flex items-center gap-1 rounded-lg bg-[#246B73] px-2.5 py-1 text-[11px] font-bold text-white hover:opacity-95 whitespace-nowrap"
                             title="Çıkış noktası, duraklar, dosya numaraları ve varış noktasını içeren güzergahı paylaş"
                           >
                             <Share2 className="h-3 w-3" />
@@ -6422,7 +6445,7 @@ export default function App() {
                           </button>
                           <button
                             onClick={() => handleRunPdfExport("daily", group.date)}
-                            className="rounded bg-slate-800 px-2 py-1 text-[11px] font-semibold text-slate-200 hover:bg-slate-700 whitespace-nowrap"
+                            className="rounded-lg bg-slate-800 px-2.5 py-1 text-[11px] font-semibold text-slate-200 hover:bg-slate-700 whitespace-nowrap"
                           >
                             Günlük PDF
                           </button>
@@ -6432,7 +6455,7 @@ export default function App() {
                               setFocusedInspectionId(null);
                               setActiveTab("harita");
                             }}
-                            className="flex items-center gap-1 rounded bg-slate-800 px-2 py-1 text-[11px] font-semibold text-emerald-300 hover:bg-slate-700 whitespace-nowrap"
+                            className="flex items-center gap-1 rounded-lg bg-slate-800 px-2.5 py-1 text-[11px] font-semibold text-[#63B5B0] hover:bg-slate-700 whitespace-nowrap"
                           >
                             <Route className="h-3 w-3" />
                             Rotayı & Parselleri Aç
@@ -6950,9 +6973,18 @@ export default function App() {
         {/* VIEW 4: GENEL HARİTA & ADA/PARSEL SINIRLARI */}
         {activeTab === "harita" && (
           <div className="space-y-4">
-            <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-3 app-card p-4 sm:p-5 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h1 className="text-sm sm:text-base font-bold text-slate-900">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 rounded-md bg-[#246B73]/12 px-2.5 py-0.5 text-[11px] font-bold text-[#246B73]">
+                    <MapPin className="h-3.5 w-3.5" />
+                    <span>CBS Saha & Parsel Haritası</span>
+                  </span>
+                  <span className="text-xs font-mono text-slate-500">
+                    TKGM Poligon · OSRM Rota · Uydu & Sokak Katmanı
+                  </span>
+                </div>
+                <h1 className="text-base sm:text-lg font-bold text-slate-900 mt-1">
                   Genel Keşif Haritası & Taşınmaz (Ada/Parsel) Sınırları
                 </h1>
                 <p className="text-xs text-slate-500">
@@ -6965,7 +6997,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setFocusedInspectionId(null)}
-                    className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                    className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
                   >
                     Tüm Harita Görünümüne Dön
                   </button>
@@ -6975,7 +7007,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setShareRouteDate(mapFilterDate)}
-                    className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 whitespace-nowrap"
+                    className="flex items-center gap-1.5 rounded-xl bg-[#246B73] px-3 py-1.5 text-xs font-bold text-white hover:opacity-95 whitespace-nowrap"
                   >
                     <Share2 className="h-3.5 w-3.5" />
                     <span>Güzergahı Paylaş</span>
@@ -6990,7 +7022,7 @@ export default function App() {
                       e.target.value === "ALL" ? null : e.target.value
                     );
                   }}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 focus:border-emerald-600 focus:outline-none"
+                  className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 focus:border-[#246B73] focus:outline-none"
                 >
                   <option value="ALL">
                     Tüm Kayıtları & Parselleri Göster ({inspections.length} Dosya)
@@ -7008,19 +7040,19 @@ export default function App() {
             </div>
 
             {mapFilterDate && dailyRouteMetrics && (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 p-3 text-xs text-emerald-950 flex flex-wrap items-center justify-between gap-2">
+              <div className="rounded-xl border border-[#246B73]/30 bg-[#246B73]/8 p-3.5 text-xs text-slate-900 flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <strong>{formatLongDateTR(mapFilterDate)} Güzergahı:</strong>{" "}
                   🏛️ Çıkış: Fatsa Adliyesi &rarr; Sıralı Duraklar &rarr; 🏁 Varış: Fatsa Adliyesi
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
-                  <span className="font-mono font-bold tabular-nums">
+                  <span className="font-mono font-bold text-[#246B73] tabular-nums">
                     Toplam Yol: {dailyRouteMetrics.distanceKm} km (~{dailyRouteMetrics.durationMin} dk)
                   </span>
                   <button
                     type="button"
                     onClick={() => setShareRouteDate(mapFilterDate)}
-                    className="inline-flex items-center gap-1 rounded bg-emerald-700 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-800"
+                    className="inline-flex items-center gap-1 rounded-lg bg-[#246B73] px-2.5 py-1 text-[11px] font-bold text-white hover:opacity-95"
                   >
                     <Share2 className="h-3 w-3" />
                     <span>Durakları & Dosya No Paylaş</span>
@@ -7029,37 +7061,39 @@ export default function App() {
               </div>
             )}
 
-            <InteractiveMap
-              mode="overview"
-              selectedLat={selectedLat}
-              selectedLng={selectedLng}
-              selectedLabel={`[${formDistrict}] ${neighborhoodInput} (${adaNo || "0"} Ada / ${parselNo || "1"} Parsel)`}
-              selectedParcelPolygon={parcelPolygon}
-              selectedParcelMeta={{
-                adaNo: adaNo.trim() || undefined,
-                parselNo: parselNo.trim() || undefined,
-                nitelik: nitelik.trim() || undefined,
-                yuzolcumuM2:
-                  Number(yuzolcumuInput) > 0
-                    ? Number(yuzolcumuInput)
-                    : undefined,
-                paftaNo: paftaNo.trim() || undefined,
-              }}
-              focusParcelZoomTrigger={focusParcelZoomTrigger}
-              inspections={
-                mapFilterDate
-                  ? inspections.filter((r) => r.date === mapFilterDate)
-                  : inspections
-              }
-              filterDate={mapFilterDate}
-              focusedInspectionId={focusedInspectionId}
-              onSelectInspection={(rec) => setFocusedInspectionId(rec.id)}
-              dailyRouteGeometry={dailyRouteGeometry}
-              heightClass="h-[380px] sm:h-[520px]"
-            />
+            <div className="app-card p-3 sm:p-4">
+              <InteractiveMap
+                mode="overview"
+                selectedLat={selectedLat}
+                selectedLng={selectedLng}
+                selectedLabel={`[${formDistrict}] ${neighborhoodInput} (${adaNo || "0"} Ada / ${parselNo || "1"} Parsel)`}
+                selectedParcelPolygon={parcelPolygon}
+                selectedParcelMeta={{
+                  adaNo: adaNo.trim() || undefined,
+                  parselNo: parselNo.trim() || undefined,
+                  nitelik: nitelik.trim() || undefined,
+                  yuzolcumuM2:
+                    Number(yuzolcumuInput) > 0
+                      ? Number(yuzolcumuInput)
+                      : undefined,
+                  paftaNo: paftaNo.trim() || undefined,
+                }}
+                focusParcelZoomTrigger={focusParcelZoomTrigger}
+                inspections={
+                  mapFilterDate
+                    ? inspections.filter((r) => r.date === mapFilterDate)
+                    : inspections
+                }
+                filterDate={mapFilterDate}
+                focusedInspectionId={focusedInspectionId}
+                onSelectInspection={(rec) => setFocusedInspectionId(rec.id)}
+                dailyRouteGeometry={dailyRouteGeometry}
+                heightClass="h-[380px] sm:h-[520px]"
+              />
+            </div>
 
             {/* Quick Parcel Selector Chips below Overview Map */}
-            <div className="rounded-xl border border-slate-200 bg-white p-3.5">
+            <div className="app-card p-4">
               <div className="text-xs font-bold text-slate-800 mb-2">
                 Kayıtlı Taşınmazlar & Araçlar (Sınırına / Konumuna Yakınlaşmak İçin Tıklayın):
               </div>
@@ -7173,10 +7207,13 @@ export default function App() {
         {activeTab === "ayarlar" && (
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-12 items-start">
             {/* Left 7 Columns: User Identity & Title Settings */}
-            <div className="lg:col-span-7 rounded-xl border border-slate-200 bg-white p-5 sm:p-6 space-y-5">
+            <div className="lg:col-span-7 app-card p-5 sm:p-6 space-y-5">
               <div className="border-b border-slate-200 pb-4">
+                <span className="inline-flex items-center gap-1.5 rounded-md bg-[#246B73]/12 px-2.5 py-0.5 text-[11px] font-bold text-[#246B73] mb-1.5">
+                  <UserCheck className="h-3.5 w-3.5" />
+                  <span>Kalem & Heyet Profil Yönetimi</span>
+                </span>
                 <div className="flex items-center gap-2">
-                  <UserCheck className="h-5 w-5 text-emerald-600" />
                   <h1 className="text-base sm:text-lg font-bold text-slate-900">
                     Kullanıcı Profili & Unvan Ayarları
                   </h1>
@@ -7206,7 +7243,7 @@ export default function App() {
                           }
                           className={`flex items-center gap-2 rounded-xl border p-3 text-left text-xs font-bold transition-all ${
                             isSelected
-                              ? "border-emerald-600 bg-emerald-50 text-emerald-950 ring-2 ring-emerald-500/20"
+                              ? "border-[#246B73] bg-[#246B73]/10 text-slate-900 ring-2 ring-[#246B73]/20"
                               : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
                           }`}
                         >
@@ -7238,7 +7275,7 @@ export default function App() {
                         })
                       }
                       placeholder="Örn: Ahmet Yılmaz"
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs sm:text-sm font-semibold text-slate-900 focus:border-emerald-600 focus:outline-none"
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2 text-xs sm:text-sm font-semibold text-slate-900 focus:border-[#246B73] focus:outline-none"
                     />
                   </div>
 
@@ -7256,7 +7293,7 @@ export default function App() {
                         })
                       }
                       placeholder="Örn: ab123456"
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs sm:text-sm font-mono text-slate-900 focus:border-emerald-600 focus:outline-none"
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2 text-xs sm:text-sm font-mono text-slate-900 focus:border-[#246B73] focus:outline-none"
                     />
                   </div>
                 </div>
@@ -7275,7 +7312,7 @@ export default function App() {
                       })
                     }
                     placeholder="Örn: Fatsa Sulh Hukuk Mahkemesi Kalemi"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs sm:text-sm text-slate-900 focus:border-emerald-600 focus:outline-none"
+                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-xs sm:text-sm text-slate-900 focus:border-[#246B73] focus:outline-none"
                   />
                 </div>
 
@@ -7289,15 +7326,15 @@ export default function App() {
                         includeDeviceName: e.target.checked,
                       })
                     }
-                    className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                    className="h-4 w-4 rounded border-slate-300 text-[#246B73] focus:ring-[#246B73]"
                   />
                   <span>
                     Keşfi ekleyen kişi bilgisinin yanına bilgisayar/telefon adını da ekle ({autoDetectedDeviceLabel || "Cihaz Adı"})
                   </span>
                 </label>
 
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 p-3.5 space-y-1">
-                  <div className="text-[11px] font-bold text-emerald-900 uppercase">
+                <div className="rounded-xl border border-[#246B73]/30 bg-[#246B73]/8 p-3.5 space-y-1">
+                  <div className="text-[11px] font-bold text-[#246B73] uppercase">
                     KEŞİFLERDE GÖRÜNECEK AKTİF EKLEYEN KİŞİ BİLGİSİ:
                   </div>
                   <div className="text-sm font-bold text-slate-900 font-mono">
@@ -7321,7 +7358,7 @@ export default function App() {
                       );
                       setTimeout(() => setFormBannerMessage(null), 4000);
                     }}
-                    className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700"
+                    className="rounded-xl bg-[#246B73] px-4 py-2 text-xs font-bold text-white hover:opacity-95"
                   >
                     ✓ Ayarları Kaydet & Uygula
                   </button>
@@ -7330,10 +7367,13 @@ export default function App() {
             </div>
 
             {/* Right 5 Columns: Cloud Sync & GitHub / Google Apps Script Shortcut */}
-            <div className="lg:col-span-5 rounded-xl border border-slate-200 bg-white p-5 sm:p-6 space-y-4">
+            <div className="lg:col-span-5 app-card p-5 sm:p-6 space-y-4">
               <div className="border-b border-slate-200 pb-3">
+                <span className="inline-flex items-center gap-1.5 rounded-md bg-[#246B73]/12 px-2.5 py-0.5 text-[11px] font-bold text-[#246B73] mb-1.5">
+                  <Cloud className="h-3.5 w-3.5" />
+                  <span>Bulut Eşitleme, Tema & Veri Yedekleme</span>
+                </span>
                 <div className="flex items-center gap-2">
-                  <Cloud className="h-5 w-5 text-emerald-600" />
                   <h2 className="text-base font-bold text-slate-900">
                     Bulut Senkronizasyon (GitHub & Google E-Tablolar)
                   </h2>
@@ -7348,7 +7388,7 @@ export default function App() {
                   <span className="font-semibold text-slate-700">
                     Aktif Senkronizasyon Yöntemi:
                   </span>
-                  <span className="rounded bg-slate-900 px-2 py-0.5 font-mono text-[11px] font-bold text-emerald-400">
+                  <span className="rounded bg-[#1B2733] px-2 py-0.5 font-mono text-[11px] font-bold text-[#63B5B0]">
                     {cloudConfig.mode === "github"
                       ? `GitHub (${cloudConfig.githubSyncType === "repo" ? "Repository" : "Gist"})`
                       : "Google Apps Script"}
@@ -7364,9 +7404,9 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setIsCloudModalOpen(true)}
-                className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-xs font-bold text-white hover:bg-slate-800"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#1B2733] px-4 py-2.5 text-xs font-bold text-white hover:opacity-95"
               >
-                <Cloud className="h-4 w-4 text-emerald-400" />
+                <Cloud className="h-4 w-4 text-[#63B5B0]" />
                 <span>
                   GitHub & Google Apps Script Senkronizasyon Ayarlarını Aç
                 </span>
