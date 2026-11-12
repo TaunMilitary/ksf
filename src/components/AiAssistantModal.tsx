@@ -84,7 +84,6 @@ const SUGGESTED_QUERIES = [
   "Toplam kaç km yol gideceğiz?",
   "Bu hafta hangi günler müsait?",
   "Kadir Sağlam hangi keşiflere katıldı?",
-  "Zaptı hazırlanmamış dosyalar",
   "Ortaklığın giderilmesi dosyaları",
   "Çamaş ilçesindeki keşifler",
   "Aynı mahalledeki yakın keşifleri göster",

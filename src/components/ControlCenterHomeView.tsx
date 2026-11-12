@@ -67,7 +67,6 @@ interface ControlCenterHomeViewProps {
 const DEFAULT_WIDGET_ORDER = [
   { id: "quick_actions", title: "Hızlı İşlem Merkezi" },
   { id: "today_upcoming", title: "Bugünkü & Yaklaşan Keşif Programı" },
-  { id: "incomplete_minutes", title: "Tamamlanmamış İşlemler & Zapt Bekleyenler" },
   { id: "nearby_clusters", title: "Aynı Mahalle / Yakın Konum Keşif Önerileri" },
   { id: "recent_added", title: "Son Eklenen Keşif Kayıtları" },
 ];
@@ -135,20 +134,6 @@ export const ControlCenterHomeView: React.FC<ControlCenterHomeViewProps> = ({
       (r) => r.status === "ertelendi"
     );
 
-    // Zapt bekleyenler: durumu zapt_bekliyor olanlar veya yapildi/planlandi olup henüz customMinutesText / assignedExpertIds tamamlanmamış olanlar
-    const pendingMinutesRecords = filteredRecords.filter((r) => {
-      if (r.status === "iptal_edildi") return false;
-      if (r.status === "zapt_bekliyor") return true;
-      if (
-        r.status === "yapildi" &&
-        !r.minutesPreparedAt &&
-        !r.customMinutesText
-      ) {
-        return true;
-      }
-      return false;
-    });
-
     const upcomingRecords = filteredRecords
       .filter(
         (r) =>
@@ -199,7 +184,6 @@ export const ControlCenterHomeView: React.FC<ControlCenterHomeViewProps> = ({
       completedCount: completedRecords.length,
       pendingCount: pendingRecords.length,
       postponedCount: postponedRecords.length,
-      pendingMinutesRecords,
       upcomingRecords,
       recentRecords,
       nearbyGroups,
@@ -384,8 +368,8 @@ export const ControlCenterHomeView: React.FC<ControlCenterHomeViewProps> = ({
         )}
       </div>
 
-      {/* 5 ÖZET İSTATİSTİK KARTI (GERÇEK VERİTABANINDAN HESAPLANIR) */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      {/* 4 ÖZET İSTATİSTİK KARTI (GERÇEK VERİTABANINDAN HESAPLANIR) */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <button
           type="button"
           onClick={() => onNavigateTab("ajanda")}
@@ -459,25 +443,6 @@ export const ControlCenterHomeView: React.FC<ControlCenterHomeViewProps> = ({
           </div>
           <div className="mt-0.5 text-[11px] text-slate-500">
             Yeni gün bekleyen dosya
-          </div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => onNavigateTab("kesif_zapti")}
-          className="app-card col-span-2 sm:col-span-1 p-3.5 text-left transition-all hover:border-purple-500"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
-              Hazırlanacak Zapt
-            </span>
-            <FileText className="h-4 w-4 text-purple-600" />
-          </div>
-          <div className="mt-1.5 font-mono text-2xl font-bold text-purple-700 tabular-nums">
-            {metrics.pendingMinutesRecords.length}
-          </div>
-          <div className="mt-0.5 text-[11px] text-slate-500">
-            Word (.doc) zapt bekleyen
           </div>
         </button>
       </div>
@@ -798,79 +763,6 @@ export const ControlCenterHomeView: React.FC<ControlCenterHomeViewProps> = ({
                   </div>
                 )}
               </div>
-            </div>
-          );
-        }
-
-        if (wId === "incomplete_minutes") {
-          return (
-            <div key={wId} className="app-card p-4 sm:p-5 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2.5">
-                <div>
-                  <h2 className="text-xs sm:text-sm font-bold text-slate-900">
-                    Tamamlanmamış İşlemler & Hazırlanacak Keşif Zaptları
-                  </h2>
-                  <p className="text-[11px] text-slate-500">
-                    Keşfi icra edilmiş veya zapt bekliyor durumundaki dosyalar ile ertelenen kayıtlar
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onNavigateTab("kesif_zapti")}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-purple-700"
-                >
-                  <FileText className="h-3.5 w-3.5" />
-                  <span>Zapt Hazırlama Ekranını Aç</span>
-                </button>
-              </div>
-
-              {metrics.pendingMinutesRecords.length === 0 &&
-              metrics.postponedCount === 0 ? (
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
-                  ✓ Bekleyen keşif zaptı veya ertelenmiş dosya bulunmuyor.
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-                  {metrics.pendingMinutesRecords.slice(0, 6).map((rec) => (
-                    <div
-                      key={rec.id}
-                      className="rounded-xl border border-purple-200 bg-purple-50/50 p-3 space-y-2"
-                    >
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-mono font-bold text-slate-900 tabular-nums">
-                          {rec.esasNo}
-                        </span>
-                        <span className="rounded bg-purple-600 px-2 py-0.5 text-[10px] font-bold text-white">
-                          Zapt Hazırlanacak
-                        </span>
-                      </div>
-                      <div className="text-xs font-semibold text-slate-800">
-                        [{rec.district}] {rec.neighborhood}
-                      </div>
-                      <div className="text-[11px] text-slate-500 font-mono">
-                        Keşif Tarihi: {formatDateTR(rec.date)} · {rec.time}
-                      </div>
-                      <div className="flex items-center gap-1.5 pt-1">
-                        <button
-                          type="button"
-                          onClick={() => onPrepareMinutesForRecord(rec.id)}
-                          className="inline-flex items-center gap-1 rounded-lg bg-purple-600 px-2.5 py-1 text-[11px] font-bold text-white"
-                        >
-                          <FileText className="h-3 w-3" />
-                          <span>Word Zapt Hazırla</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onEditInspection(rec)}
-                          className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700"
-                        >
-                          Düzenle
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           );
         }
