@@ -46,6 +46,7 @@ import {
   Home,
   FileSpreadsheet,
   FileText,
+  BarChart3,
 } from "lucide-react";
 import {
   ActiveTab,
@@ -87,7 +88,9 @@ import {
 import {
   buildDailyRoutePoints,
   calculateOSRMRoute,
+  computeUniqueParcelAreaSum,
   detectClientDeviceInfo,
+  expandBagimsizBolumTokens,
   extractRecordLocationStops,
   fetchNearbyTkgmParcels,
   fetchTkgmParcelByCoordinate,
@@ -129,6 +132,7 @@ import {
 import { MultiRouteAdvisorView } from "./components/MultiRouteAdvisorView";
 import { EditInspectionModal } from "./components/EditInspectionModal";
 import { InspectionMinutesView } from "./components/InspectionMinutesView";
+import { StatisticsDashboardView } from "./components/StatisticsDashboardView";
 import { DEFAULT_REGISTERED_EXPERTS } from "./services/wordMinutesService";
 import {
   GitHubPublishResult,
@@ -439,6 +443,10 @@ export default function App() {
   const [adaNo, setAdaNo] = useState<string>("");
   const [parselNo, setParselNo] = useState<string>("");
   const [bagimsizBolumNo, setBagimsizBolumNo] = useState<string>("");
+  // Aynı parsel üzerinde birden fazla bağımsız bölüm ekleme modu ve listesi
+  const [isMultiBbMode, setIsMultiBbMode] = useState<boolean>(false);
+  const [multiBbDraftList, setMultiBbDraftList] = useState<string[]>([]);
+  const [singleBbEntryInput, setSingleBbEntryInput] = useState<string>("");
   const [nitelik, setNitelik] = useState<string>("");
   const [yuzolcumuInput, setYuzolcumuInput] = useState<string>("");
   const [paftaNo, setPaftaNo] = useState<string>("");
@@ -956,7 +964,8 @@ export default function App() {
         (p) =>
           (p.neighborhood || "") === (currentItem.neighborhood || "") &&
           p.adaNo === currentItem.adaNo &&
-          p.parselNo === currentItem.parselNo
+          p.parselNo === currentItem.parselNo &&
+          (p.bagimsizBolumNo || "") === (currentItem.bagimsizBolumNo || "")
       );
       if (!exists) {
         list.push(currentItem);
@@ -976,7 +985,9 @@ export default function App() {
             currentInputItem &&
             !(
               currentInputItem.adaNo === item.adaNo &&
-              currentInputItem.parselNo === item.parselNo
+              currentInputItem.parselNo === item.parselNo &&
+              (currentInputItem.bagimsizBolumNo || "") ===
+                (item.bagimsizBolumNo || "")
             )
           ) {
             next.push(currentInputItem);
@@ -986,7 +997,8 @@ export default function App() {
           (p) =>
             (p.neighborhood || "") === (item.neighborhood || "") &&
             p.adaNo === item.adaNo &&
-            p.parselNo === item.parselNo
+            p.parselNo === item.parselNo &&
+            (p.bagimsizBolumNo || "") === (item.bagimsizBolumNo || "")
         );
         if (!itemExists) {
           next.push(item);
@@ -994,6 +1006,9 @@ export default function App() {
         return next;
       });
       setParselNo("");
+      setBagimsizBolumNo("");
+      setMultiBbDraftList([]);
+      setSingleBbEntryInput("");
       setYuzolcumuInput("");
       setPaftaNo("");
       setFocusParcelZoomTrigger((c) => c + 1);
@@ -1007,44 +1022,135 @@ export default function App() {
     [buildCurrentInputParcelItem, isQueryingParcel]
   );
 
-  // Mevcut input'taki parseli çoklu parsel listesine ekle (Önceki eklenen parselleri korur ve yeni parsel girişi için Parsel No kutusunu hazırlar)
-  const handleAddCurrentInputParcelToList = () => {
-    const item = buildCurrentInputParcelItem();
-    if (!item) {
-      setFormBannerMessage("Lütfen önce eklenecek Parsel numarasını (ve varsa Ada numarasını) yazınız.");
+  // Çoklu bağımsız bölüm taslak listesine (multiBbDraftList) yeni bağımsız bölüm(ler) ekle
+  const handleAddUnitToMultiBbDraft = (rawText?: string) => {
+    const sourceText =
+      typeof rawText === "string"
+        ? rawText
+        : singleBbEntryInput.trim() || bagimsizBolumNo.trim();
+    const tokens = expandBagimsizBolumTokens(sourceText);
+    if (tokens.length === 0) return;
+    setMultiBbDraftList((prev) => {
+      const next = [...prev];
+      for (const t of tokens) {
+        if (!next.includes(t)) next.push(t);
+      }
+      return next;
+    });
+    setSingleBbEntryInput("");
+    setBagimsizBolumNo("");
+  };
+
+  // Mevcut input'taki parseli (ve varsa birden fazla bağımsız bölümü ayrı ayrı) çoklu parsel listesine ekle
+  const handleAddCurrentInputParcelToList = (keepSameParcelForNextBb = false) => {
+    const baseItem = buildCurrentInputParcelItem();
+    if (!baseItem) {
+      setFormBannerMessage(
+        "Lütfen önce eklenecek Parsel numarasını (ve varsa Ada numarasını) yazınız."
+      );
       setTimeout(() => setFormBannerMessage(null), 3000);
       return;
     }
 
-    setFormParcels((prev) => {
-      const existsIndex = prev.findIndex(
-        (p) =>
-          (p.neighborhood || "") === (item.neighborhood || "") &&
-          p.adaNo === item.adaNo &&
-          p.parselNo === item.parselNo
-      );
-      if (existsIndex >= 0) {
-        const updated = [...prev];
-        updated[existsIndex] = item;
-        return updated;
+    // Hem kutudaki Bağımsız Bölüm No'yu (virgül/tire ile çoklu yazılmış olabilir) hem de Çoklu B.Bölüm taslak listesini birleştir
+    const fromInputTokens = expandBagimsizBolumTokens(bagimsizBolumNo);
+    const fromSingleBoxTokens = expandBagimsizBolumTokens(singleBbEntryInput);
+    const combinedBbTokens: string[] = [];
+    for (const t of [
+      ...multiBbDraftList,
+      ...fromInputTokens,
+      ...fromSingleBoxTokens,
+    ]) {
+      if (t && !combinedBbTokens.includes(t)) {
+        combinedBbTokens.push(t);
       }
-      return [...prev, item];
+    }
+
+    const itemsToAdd: ParcelItem[] =
+      combinedBbTokens.length > 0
+        ? combinedBbTokens.map((bbVal, idx) => ({
+            ...baseItem,
+            id: `${baseItem.mahalleId || formDistrict}-${baseItem.adaNo}-${
+              baseItem.parselNo
+            }-bb${bbVal}-${Date.now()}-${idx}`,
+            bagimsizBolumNo: bbVal,
+          }))
+        : [baseItem];
+
+    setFormParcels((prev) => {
+      const updated = [...prev];
+      for (const item of itemsToAdd) {
+        // Eğer aynı mahalle + ada + parsel için daha önce Bağımsız Bölümsüz (boş) bir kayıt eklendiyse ve şimdi Bağımsız Bölümlü ekleniyorsa, boş olanı güncelle
+        const emptyBbIdx =
+          item.bagimsizBolumNo
+            ? updated.findIndex(
+                (p) =>
+                  (p.neighborhood || "") === (item.neighborhood || "") &&
+                  p.adaNo === item.adaNo &&
+                  p.parselNo === item.parselNo &&
+                  !p.bagimsizBolumNo
+              )
+            : -1;
+
+        const exactMatchIdx = updated.findIndex(
+          (p) =>
+            (p.neighborhood || "") === (item.neighborhood || "") &&
+            p.adaNo === item.adaNo &&
+            p.parselNo === item.parselNo &&
+            (p.bagimsizBolumNo || "") === (item.bagimsizBolumNo || "")
+        );
+
+        if (exactMatchIdx >= 0) {
+          updated[exactMatchIdx] = item;
+        } else if (emptyBbIdx >= 0 && itemsToAdd.length === 1) {
+          updated[emptyBbIdx] = item;
+        } else {
+          updated.push(item);
+        }
+      }
+      return updated;
     });
 
-    // 1. parsel eklendikten sonra 2. parseli yazarken üzerine yazmaması için parselNo ve detay kutularını temizle (Ada No aynı kalır, kullanıcı hemen 2. parsel numarasını yazabilir)
+    if (keepSameParcelForNextBb) {
+      // Aynı parselde yeni bağımsız bölüm girebilmek için Ada No, Parsel No, Yüzölçümü ve TKGM Poligonunu KORU; sadece Bağımsız Bölüm kutusunu temizle!
+      setBagimsizBolumNo("");
+      setSingleBbEntryInput("");
+      setMultiBbDraftList([]);
+      setFormBannerMessage(
+        `✓ ${baseItem.adaNo} Ada / ${baseItem.parselNo} Parsel — ${
+          combinedBbTokens.length > 0
+            ? `Bağımsız Bölüm No: ${combinedBbTokens.join(", ")}`
+            : "Parsel"
+        } dosyaya eklendi. Aynı parsel üzerindeki bir sonraki Bağımsız Bölüm numarasını hemen kutuya yazıp tekrar ekleyebilirsiniz.`
+      );
+      setTimeout(() => setFormBannerMessage(null), 4500);
+      return;
+    }
+
+    // 1. parsel eklendikten sonra 2. parseli yazarken üzerine yazmaması için parselNo ve detay kutularını temizle (Ada No aynı kalır)
     setParselNo("");
     setBagimsizBolumNo("");
+    setSingleBbEntryInput("");
+    setMultiBbDraftList([]);
     setYuzolcumuInput("");
     setPaftaNo("");
     setParcelPolygon([]);
     setTkgmStatusMessage(null);
     setFocusParcelZoomTrigger((c) => c + 1);
     setFormBannerMessage(
-      `✓ ${item.adaNo} Ada / ${item.parselNo} Parsel${
-        item.bagimsizBolumNo ? ` (Bağımsız Bölüm No: ${item.bagimsizBolumNo})` : ""
-      } dosyaya eklendi. Şimdi 2. (veya sonraki) parsel numarasını yazıp tekrar 'Parseli Dosyaya Ekle' butonuna basabilirsiniz.`
+      itemsToAdd.length > 1
+        ? `✓ ${baseItem.adaNo} Ada / ${baseItem.parselNo} Parsel üzerindeki ${
+            itemsToAdd.length
+          } adet Bağımsız Bölüm (No: ${combinedBbTokens.join(
+            ", "
+          )}) ayrı ayrı dosyaya eklendi.`
+        : `✓ ${baseItem.adaNo} Ada / ${baseItem.parselNo} Parsel${
+            itemsToAdd[0].bagimsizBolumNo
+              ? ` (Bağımsız Bölüm No: ${itemsToAdd[0].bagimsizBolumNo})`
+              : ""
+          } dosyaya eklendi. Şimdi 2. (veya sonraki) parsel numarasını yazıp tekrar 'Parseli Dosyaya Ekle' butonuna basabilirsiniz.`
     );
-    setTimeout(() => setFormBannerMessage(null), 4000);
+    setTimeout(() => setFormBannerMessage(null), 4500);
   };
 
   // Yeni Keşif Ekle menüsüne basıldığında parsel bilgilerini sıfırlayarak (boş) açan yardımcı fonksiyon
@@ -1063,6 +1169,9 @@ export default function App() {
         setAdaNo("");
         setParselNo("");
         setBagimsizBolumNo("");
+        setIsMultiBbMode(false);
+        setMultiBbDraftList([]);
+        setSingleBbEntryInput("");
         setYuzolcumuInput("");
         setPaftaNo("");
         setNitelik("");
@@ -1098,22 +1207,28 @@ export default function App() {
     []
   );
 
-  // Çoklu parsel listesinden parsel sil
+  // Çoklu parsel listesinden belirli satırı (veya bağımsız bölümü) sil
   const handleRemoveParcelFromList = (
     ada: string,
     parsel: string,
-    neigh?: string
+    neigh?: string,
+    bagimsizBolum?: string,
+    targetIdx?: number
   ) => {
-    setFormParcels((prev) =>
-      prev.filter(
+    setFormParcels((prev) => {
+      if (typeof targetIdx === "number") {
+        return prev.filter((_, i) => i !== targetIdx);
+      }
+      return prev.filter(
         (p) =>
           !(
             p.adaNo === ada &&
             p.parselNo === parsel &&
-            (!neigh || (p.neighborhood || "") === neigh)
+            (!neigh || (p.neighborhood || "") === neigh) &&
+            (p.bagimsizBolumNo || "") === (bagimsizBolum || "")
           )
-      )
-    );
+      );
+    });
   };
 
   // Toplu parsel numarası girişi (Örn: "2, 3, 5, 8" veya "101/2, 101/3") -> Önceki parselleri koruyarak TKGM'den çekip çoklu parsel listesine ekler
@@ -1363,7 +1478,8 @@ export default function App() {
               (p) =>
                 (p.neighborhood || "") === (item.neighborhood || "") &&
                 p.adaNo === item.adaNo &&
-                p.parselNo === item.parselNo
+                p.parselNo === item.parselNo &&
+                (p.bagimsizBolumNo || "") === (item.bagimsizBolumNo || "")
             );
             if (existingIdx >= 0) {
               next[existingIdx] = item;
@@ -1922,43 +2038,58 @@ export default function App() {
         parcelPolygon && parcelPolygon.length >= 3 ? parcelPolygon : undefined;
 
       // ÖNEMLİ DÜZELTME: Sadece Parsel No kutusunda gerçek bir parsel numarası (cleanParsel) yazılıysa listeye ekle!
-      // Ada No yazılı olup Parsel No boş olduğunda (örn. 137/13 eklendikten sonra Ada kutusunda 137 kaldığında) asla '137/1' üretme!
+      // Eğer kullanıcı aynı parsel için birden fazla bağımsız bölüm girdiyse (multiBbDraftList veya virgül/tire ile ayrılmış bagimsizBolumNo), her birini ayrı ayrı ekle!
       const finalParcelsList: ParcelItem[] = [...formParcels];
+      const allPendingBbs: string[] = [];
+      for (const bToken of [
+        ...multiBbDraftList,
+        ...expandBagimsizBolumTokens(bagimsizBolumNo),
+        ...expandBagimsizBolumTokens(singleBbEntryInput),
+      ]) {
+        if (bToken && !allPendingBbs.includes(bToken)) {
+          allPendingBbs.push(bToken);
+        }
+      }
+
       if (cleanParsel) {
         const currentKeyAda = cleanAda || "0";
         const currentKeyParsel = cleanParsel;
-        const hasCurrent = finalParcelsList.some(
-          (p) =>
-            (p.neighborhood || "") === neighborhoodInput.trim() &&
-            p.adaNo === currentKeyAda &&
-            p.parselNo === currentKeyParsel &&
-            (p.bagimsizBolumNo || "") === (cleanBb || "")
-        );
-        if (!hasCurrent) {
-          finalParcelsList.push({
-            id: `${selectedTkgmMahalleId || formDistrict}-${currentKeyAda}-${currentKeyParsel}${cleanBb ? `-bb${cleanBb}` : ""}`,
-            mahalleId: selectedTkgmMahalleId,
-            neighborhood: neighborhoodInput.trim(),
-            adaNo: currentKeyAda,
-            parselNo: currentKeyParsel,
-            bagimsizBolumNo: cleanBb,
-            nitelik: nitelik.trim() || undefined,
-            yuzolcumuM2: cleanArea,
-            paftaNo: paftaNo.trim() || undefined,
-            mevkii: addressDetail.trim() || undefined,
-            centerLat: selectedLat,
-            centerLng: selectedLng,
-            polygon: finalPolygon,
-            source: parcelSource,
-          });
+        const effectiveBbsToInsert: (string | undefined)[] =
+          allPendingBbs.length > 0 ? allPendingBbs : [cleanBb];
+
+        for (const bbItem of effectiveBbsToInsert) {
+          const hasCurrent = finalParcelsList.some(
+            (p) =>
+              (p.neighborhood || "") === neighborhoodInput.trim() &&
+              p.adaNo === currentKeyAda &&
+              p.parselNo === currentKeyParsel &&
+              (p.bagimsizBolumNo || "") === (bbItem || "")
+          );
+          if (!hasCurrent) {
+            finalParcelsList.push({
+              id: `${selectedTkgmMahalleId || formDistrict}-${currentKeyAda}-${currentKeyParsel}${
+                bbItem ? `-bb${bbItem}` : ""
+              }`,
+              mahalleId: selectedTkgmMahalleId,
+              neighborhood: neighborhoodInput.trim(),
+              adaNo: currentKeyAda,
+              parselNo: currentKeyParsel,
+              bagimsizBolumNo: bbItem,
+              nitelik: nitelik.trim() || undefined,
+              yuzolcumuM2: cleanArea,
+              paftaNo: paftaNo.trim() || undefined,
+              mevkii: addressDetail.trim() || undefined,
+              centerLat: selectedLat,
+              centerLng: selectedLng,
+              polygon: finalPolygon,
+              source: parcelSource,
+            });
+          }
         }
       }
 
       const primaryParcel = finalParcelsList[0];
-      const totalMultiArea = finalParcelsList.reduce(
-        (sum, p) => sum + (p.yuzolcumuM2 || 0),
-        0
-      );
+      const totalMultiArea = computeUniqueParcelAreaSum(finalParcelsList);
 
       // Dosyada birden fazla mahalle varsa tüm mahalle adlarını birleştir (Örn: "Saraytepe Mahallesi / Ilıca Mahallesi")
       const effectivePrimaryNeighborhood =
@@ -2044,6 +2175,9 @@ export default function App() {
     setAdaNo("");
     setParselNo("");
     setBagimsizBolumNo("");
+    setIsMultiBbMode(false);
+    setMultiBbDraftList([]);
+    setSingleBbEntryInput("");
     setYuzolcumuInput("");
     setPaftaNo("");
     setNitelik("");
@@ -3132,6 +3266,17 @@ export default function App() {
           >
             <Users className="h-3.5 w-3.5 text-purple-300" />
             <span>Bilirkişi Ekle ({registeredExperts.length})</span>
+          </button>
+          <button
+            onClick={() => setActiveTab("istatistikler")}
+            className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition-all whitespace-nowrap shrink-0 ${
+              activeTab === "istatistikler"
+                ? "border-emerald-300 bg-emerald-600 text-white ring-2 ring-emerald-400/40"
+                : "border-emerald-500/40 bg-emerald-950/60 text-emerald-200 hover:bg-emerald-800 hover:text-white"
+            }`}
+          >
+            <BarChart3 className="h-3.5 w-3.5 text-emerald-300" />
+            <span>İstatistik & Grafikler</span>
           </button>
           <button
             onClick={() => setActiveTab("ai_rota")}
@@ -4405,17 +4550,39 @@ export default function App() {
                         />
                       </div>
                       <div>
-                        <label
-                          className="block text-[11px] font-semibold text-slate-700 mb-1"
-                          title="Harita veya güzergahı etkilemez; Keşif Ajandasında ve bilirkişilerle yapılan güzergah paylaşımlarında görünür"
-                        >
-                          Bağımsız Bölüm No
-                        </label>
+                        <div className="flex items-center justify-between gap-1 mb-1">
+                          <label
+                            className="block text-[11px] font-semibold text-slate-700"
+                            title="Tek bağımsız bölüm (Örn: 4) veya virgül/tire ile birden fazla (Örn: 1, 2, 5 veya 1-4) girebilirsiniz"
+                          >
+                            Bağımsız Bölüm No
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setIsMultiBbMode((prev) => !prev)}
+                            className={`rounded px-1.5 py-0.5 text-[10px] font-bold transition-colors ${
+                              isMultiBbMode
+                                ? "bg-indigo-600 text-white"
+                                : "bg-indigo-50 text-indigo-800 hover:bg-indigo-100 border border-indigo-200"
+                            }`}
+                            title="Aynı parsel üzerinde birden fazla bağımsız bölüm varsa ayrı ayrı girmek için tıklayın"
+                          >
+                            {isMultiBbMode
+                              ? "✓ Çoklu B.Bölüm Açık"
+                              : "+ Çoklu B.Bölüm"}
+                          </button>
+                        </div>
                         <input
                           type="text"
                           value={bagimsizBolumNo}
                           onChange={(e) => setBagimsizBolumNo(e.target.value)}
-                          placeholder="Örn: 4, Kat 1 No:3"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && isMultiBbMode) {
+                              e.preventDefault();
+                              handleAddUnitToMultiBbDraft(bagimsizBolumNo);
+                            }
+                          }}
+                          placeholder="Örn: 4 veya 1, 2, 5"
                           className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-mono font-bold text-indigo-900 focus:border-amber-600 focus:outline-none"
                         />
                       </div>
@@ -4448,6 +4615,106 @@ export default function App() {
                         />
                       </div>
                     </div>
+
+                    {/* ============================================================
+                        AYNI PARSELDE BİRDEN FAZLA BAĞIMSIZ BÖLÜM GİRİŞ PANELİ
+                       ============================================================ */}
+                    {(isMultiBbMode || multiBbDraftList.length > 0) && (
+                      <div className="rounded-lg border border-indigo-300 bg-indigo-50/75 p-2.5 space-y-2">
+                        <div className="flex flex-wrap items-center justify-between gap-1.5">
+                          <span className="text-[11px] font-bold text-indigo-950">
+                            🏢 Aynı Parsel ({adaNo.trim() || "0"} Ada /{" "}
+                            {parselNo.trim() || "?"} Parsel) Üzerindeki Birden
+                            Fazla Bağımsız Bölümü Ayrı Ayrı Girin:
+                          </span>
+                          {multiBbDraftList.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setMultiBbDraftList([])}
+                              className="text-[10px] font-semibold text-rose-700 hover:underline"
+                            >
+                              Listeyi Temizle
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <input
+                            type="text"
+                            value={singleBbEntryInput}
+                            onChange={(e) =>
+                              setSingleBbEntryInput(e.target.value)
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                handleAddUnitToMultiBbDraft(singleBbEntryInput);
+                              }
+                            }}
+                            placeholder="B.Bölüm No yazın (Örn: 1 veya 1, 2, 5 veya Kat 1 No:3)..."
+                            className="flex-1 min-w-[180px] rounded border border-indigo-300 bg-white px-2.5 py-1 text-xs font-mono font-bold text-indigo-950 focus:border-indigo-600 focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleAddUnitToMultiBbDraft(singleBbEntryInput)
+                            }
+                            className="inline-flex items-center gap-1 rounded bg-indigo-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-indigo-700 whitespace-nowrap"
+                          >
+                            <Plus className="h-3 w-3" />
+                            <span>B.Bölüm Listeye Ekle</span>
+                          </button>
+                          {parselNo.trim() &&
+                            (multiBbDraftList.length > 0 ||
+                              bagimsizBolumNo.trim() ||
+                              singleBbEntryInput.trim()) && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleAddCurrentInputParcelToList(false)
+                                }
+                                className="inline-flex items-center gap-1 rounded bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-700 whitespace-nowrap"
+                              >
+                                <Check className="h-3 w-3" />
+                                <span>
+                                  Tüm Bağımsız Bölümleri Ayrı Ayrı Dosyaya Ekle
+                                </span>
+                              </button>
+                            )}
+                        </div>
+
+                        {multiBbDraftList.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                            <span className="text-[10px] font-bold text-indigo-900">
+                              Eklenecek Bağımsız Bölümler ({multiBbDraftList.length}{" "}
+                              Adet):
+                            </span>
+                            {multiBbDraftList.map((bbItem, bIdx) => (
+                              <span
+                                key={`${bbItem}-${bIdx}`}
+                                className="inline-flex items-center gap-1 rounded border border-indigo-400 bg-white px-2 py-0.5 font-mono text-[11px] font-bold text-indigo-950 shadow-2xs"
+                              >
+                                <span>
+                                  {bIdx + 1}. B.Bölüm: {bbItem}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setMultiBbDraftList((prev) =>
+                                      prev.filter((_, i) => i !== bIdx)
+                                    )
+                                  }
+                                  className="text-slate-400 hover:text-rose-600"
+                                  title="Bu bağımsız bölümü çıkar"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Taşınmaz Niteliği & Mevki */}
                     <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
@@ -4484,7 +4751,7 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Action Buttons: Fetch TKGM Boundary + Add Current Parcel to Multi-Parcel File */}
+                    {/* Action Buttons: Fetch TKGM Boundary + Add Current Parcel to Multi-Parcel File + Add Another Independent Unit on Same Parcel */}
                     <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-amber-200/80">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <button
@@ -4502,7 +4769,9 @@ export default function App() {
                         </button>
                         <button
                           type="button"
-                          onClick={handleAddCurrentInputParcelToList}
+                          onClick={() =>
+                            handleAddCurrentInputParcelToList(false)
+                          }
                           className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 transition-colors whitespace-nowrap"
                         >
                           <Plus className="h-3.5 w-3.5" />
@@ -4510,6 +4779,19 @@ export default function App() {
                             {parselNo.trim()
                               ? `${adaNo.trim() || "0"}/${parselNo.trim()} Parseli Dosyaya Ekle`
                               : "Parseli Dosyaya Ekle"}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleAddCurrentInputParcelToList(true)
+                          }
+                          className="inline-flex items-center gap-1 rounded-lg border border-indigo-400 bg-indigo-600 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-indigo-700 transition-colors whitespace-nowrap"
+                          title="Bu bağımsız bölümü dosyaya ekler ve aynı parsel numarasını koruyarak bir sonraki bağımsız bölümü girmenizi sağlar"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          <span>
+                            Aynı Parsele Başka B.Bölüm Ekle
                           </span>
                         </button>
                       </div>
@@ -4633,20 +4915,15 @@ export default function App() {
                     </div>
 
                     {/* ============================================================
-                        DOSYAYA EKLENEN PARSELLER LİSTESİ (ÇOKLU PARSEL ÖZETİ)
+                        DOSYAYA EKLENEN PARSELLER VE BAĞIMSIZ BÖLÜMLER LİSTESİ
                        ============================================================ */}
                     {formParcels.length > 0 && (
                       <div className="rounded-lg border border-amber-300 bg-amber-100/50 p-2.5 space-y-2">
                         <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                           <span className="font-bold text-amber-950">
-                            📋 Bu Keşif Dosyasına Eklenen Parseller (
-                            {formParcels.length} Adet · Toplam:{" "}
-                            {formatAreaM2(
-                              formParcels.reduce(
-                                (acc, p) => acc + (p.yuzolcumuM2 || 0),
-                                0
-                              )
-                            )}{" "}
+                            📋 Bu Keşif Dosyasına Eklenen Parsel & Bağımsız Bölümler (
+                            {formParcels.length} Adet · Toplam Arsa:{" "}
+                            {formatAreaM2(computeUniqueParcelAreaSum(formParcels))}{" "}
                             m²)
                           </span>
                           {formParcels.length > 1 && (
@@ -4657,18 +4934,18 @@ export default function App() {
                               }
                               className="text-[11px] font-semibold text-red-700 hover:underline"
                             >
-                              Sadece 1. Parseli Bırak
+                              Sadece 1. Kaydı Bırak
                             </button>
                           )}
                         </div>
                         <div className="flex flex-wrap items-center gap-1.5">
                           {formParcels.map((p, idx) => (
                             <div
-                              key={`${p.neighborhood || ""}-${p.adaNo}-${p.parselNo}-${idx}`}
+                              key={`${p.neighborhood || ""}-${p.adaNo}-${p.parselNo}-${p.bagimsizBolumNo || ""}-${idx}`}
                               className="inline-flex items-center gap-1.5 rounded-md border border-amber-400 bg-white px-2 py-1 text-xs shadow-2xs"
                             >
                               <span className="rounded bg-amber-600 px-1.5 py-0.2 font-mono text-[10px] font-bold text-white">
-                                {idx + 1}. Parsel
+                                #{idx + 1}
                               </span>
                               {p.neighborhood && (
                                 <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">
@@ -4704,15 +4981,40 @@ export default function App() {
                               )}
                               <button
                                 type="button"
+                                onClick={() => {
+                                  if (p.neighborhood) {
+                                    setNeighborhoodInput(p.neighborhood);
+                                  }
+                                  setAdaNo(p.adaNo);
+                                  setParselNo(p.parselNo);
+                                  if (p.yuzolcumuM2) {
+                                    setYuzolcumuInput(String(p.yuzolcumuM2));
+                                  }
+                                  if (p.nitelik) setNitelik(p.nitelik);
+                                  if (p.polygon && p.polygon.length >= 3) {
+                                    setParcelPolygon(p.polygon);
+                                  }
+                                  setIsMultiBbMode(true);
+                                  setBagimsizBolumNo("");
+                                }}
+                                className="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700 hover:bg-indigo-100"
+                                title="Bu parsel üzerinde yeni bir Bağımsız Bölüm daha ekle"
+                              >
+                                +B.Bölüm
+                              </button>
+                              <button
+                                type="button"
                                 onClick={() =>
                                   handleRemoveParcelFromList(
                                     p.adaNo,
                                     p.parselNo,
-                                    p.neighborhood
+                                    p.neighborhood,
+                                    p.bagimsizBolumNo,
+                                    idx
                                   )
                                 }
                                 className="ml-0.5 text-slate-400 hover:text-red-600"
-                                title="Bu parseli dosyadan çıkar"
+                                title="Bu parseli / bağımsız bölümü dosyadan çıkar"
                               >
                                 <X className="h-3.5 w-3.5" />
                               </button>
@@ -5234,6 +5536,15 @@ export default function App() {
                   >
                     <Users className="h-3.5 w-3.5 text-purple-700" />
                     <span>Bilirkişi Ekle ({registeredExperts.length})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("istatistikler")}
+                    className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-800 whitespace-nowrap shadow-xs"
+                    title="Aylık ve günlük yapılan keşif, parsel sayısı ve kilometre istatistik grafiklerini aç"
+                  >
+                    <BarChart3 className="h-3.5 w-3.5 text-emerald-400" />
+                    <span>İstatistik & Grafikler</span>
                   </button>
                   <button
                     type="button"
@@ -5964,6 +6275,18 @@ export default function App() {
           />
         )}
 
+        {/* VIEW 4.9: AYLIK VE GÜNLÜK İSTATİSTİK GRAFİKLERİ PANELİ */}
+        {activeTab === "istatistikler" && (
+          <StatisticsDashboardView
+            inspections={inspections}
+            onOpenExcelModalForMonth={(ym) => {
+              setExcelYearMonth(ym);
+              setIsExcelModalOpen(true);
+            }}
+            onSelectInspectionToEdit={(rec) => setEditingInspection(rec)}
+          />
+        )}
+
         {/* VIEW 5: AYARLAR (KULLANICI ADI, UNVAN SEÇİMİ VE BULUT SENKRONİZASYON) */}
         {activeTab === "ayarlar" && (
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-12 items-start">
@@ -6304,13 +6627,13 @@ export default function App() {
           <span>Zapt Hazırla</span>
         </button>
         <button
-          onClick={() => setActiveTab("ai_rota")}
+          onClick={() => setActiveTab("istatistikler")}
           className={`flex flex-col items-center gap-0.5 text-[10px] font-semibold ${
-            activeTab === "ai_rota" ? "text-emerald-700" : "text-slate-500"
+            activeTab === "istatistikler" ? "text-emerald-700" : "text-slate-500"
           }`}
         >
-          <Sparkles className="h-4 w-4" />
-          <span>YZ Rota</span>
+          <BarChart3 className="h-4 w-4" />
+          <span>İstatistik</span>
         </button>
         <button
           onClick={() => setActiveTab("ayarlar")}

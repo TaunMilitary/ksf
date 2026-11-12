@@ -190,6 +190,7 @@ export type ActiveTab =
   | "ai_rota"
   | "kesif_zapti"
   | "bilirkisiler"
+  | "istatistikler"
   | "ayarlar";
 
 export type PdfExportPeriod = "daily" | "weekly" | "monthly";

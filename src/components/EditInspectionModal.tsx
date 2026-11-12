@@ -44,6 +44,8 @@ import {
 } from "../data/tkgmMahalleData";
 import {
   calculateOSRMRoute,
+  computeUniqueParcelAreaSum,
+  expandBagimsizBolumTokens,
   extractRecordLocationStops,
   fetchNearbyTkgmParcels,
   formatAreaM2,
@@ -289,6 +291,25 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
     setParcels((prev) => prev.filter((_, i) => i !== idx));
   };
 
+  // Mevcut listedeki bir parselin üzerine yeni bir Bağımsız Bölüm satırı ekle (Aynı Ada/Parsel ve TKGM sınırını korur)
+  const handleAddAnotherBbToParcelAtIndex = (idx: number) => {
+    setParcels((prev) => {
+      const source = prev[idx];
+      if (!source) return prev;
+      const cloned: ParcelItem = {
+        ...source,
+        id: `${source.mahalleId || district}-${source.adaNo}-${source.parselNo}-bb-${Date.now()}`,
+        bagimsizBolumNo: "",
+      };
+      const next = [...prev];
+      next.splice(idx + 1, 0, cloned);
+      return next;
+    });
+    setTkgmMessage(
+      `✓ ${parcels[idx]?.adaNo} Ada / ${parcels[idx]?.parselNo} Parsel için yeni bağımsız bölüm satırı eklendi. Bağımsız Bölüm No kutusuna numarasını yazabilirsiniz.`
+    );
+  };
+
   // Mevcut listedeki bir parselin sınırını ve yüzölçümünü TKGM'den yeniden çek
   const handleRefreshParcelFromTkgm = async (idx: number) => {
     const target = parcels[idx];
@@ -383,14 +404,19 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
       });
 
       const resolvedMah = res.mahalleId || tkgmMahalleId;
-      const cleanNewBb = newBagimsizBolumNo.trim() || undefined;
-      const newItem: ParcelItem = {
-        id: `${resolvedMah || district}-${res.adaNo}-${res.parselNo}${cleanNewBb ? `-bb${cleanNewBb}` : ""}`,
+      const bbTokens = expandBagimsizBolumTokens(newBagimsizBolumNo);
+      const effectiveBbList: (string | undefined)[] =
+        bbTokens.length > 0 ? bbTokens : [undefined];
+
+      const newItems: ParcelItem[] = effectiveBbList.map((bbVal, i) => ({
+        id: `${resolvedMah || district}-${res.adaNo}-${res.parselNo}${
+          bbVal ? `-bb${bbVal}` : ""
+        }-${Date.now()}-${i}`,
         mahalleId: resolvedMah,
         neighborhood,
         adaNo: res.adaNo,
         parselNo: res.parselNo,
-        bagimsizBolumNo: cleanNewBb,
+        bagimsizBolumNo: bbVal,
         nitelik: newNitelik.trim() || res.nitelik || undefined,
         yuzolcumuM2: manualArea || res.areaM2,
         paftaNo: newPaftaNo.trim() || res.paftaNo || undefined,
@@ -399,27 +425,30 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
         centerLng: res.centerLng,
         polygon: res.polygon,
         source: res.source,
-      };
+      }));
 
       let nextParcelsSnapshot: ParcelItem[] = [];
       setParcels((prev) => {
-        const existsIdx = prev.findIndex(
-          (p) =>
-            (p.neighborhood || "") === (newItem.neighborhood || "") &&
-            p.adaNo === newItem.adaNo &&
-            p.parselNo === newItem.parselNo &&
-            (p.bagimsizBolumNo || "") === (newItem.bagimsizBolumNo || "")
-        );
-        if (existsIdx >= 0) {
-          const copy = [...prev];
-          copy[existsIdx] = newItem;
-          nextParcelsSnapshot = copy;
-          return copy;
+        const copy = [...prev];
+        for (const newItem of newItems) {
+          const existsIdx = copy.findIndex(
+            (p) =>
+              (p.neighborhood || "") === (newItem.neighborhood || "") &&
+              p.adaNo === newItem.adaNo &&
+              p.parselNo === newItem.parselNo &&
+              (p.bagimsizBolumNo || "") === (newItem.bagimsizBolumNo || "")
+          );
+          if (existsIdx >= 0) {
+            copy[existsIdx] = newItem;
+          } else {
+            copy.push(newItem);
+          }
         }
-        nextParcelsSnapshot = [...prev, newItem];
-        return nextParcelsSnapshot;
+        nextParcelsSnapshot = copy;
+        return copy;
       });
 
+      const firstNew = newItems[0];
       const nextPrimaryLat =
         parcels.length === 0 && res.centerLat ? res.centerLat : lat;
       const nextPrimaryLng =
@@ -431,7 +460,9 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
       recalculateDistanceForCoords(
         nextPrimaryLat,
         nextPrimaryLng,
-        nextParcelsSnapshot.length > 0 ? nextParcelsSnapshot : [...parcels, newItem],
+        nextParcelsSnapshot.length > 0
+          ? nextParcelsSnapshot
+          : [...parcels, ...newItems],
         neighborhood
       );
 
@@ -458,11 +489,15 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
       setNewYuzolcumu("");
       setNewPaftaNo("");
       setTkgmMessage(
-        `✓ ${newItem.adaNo} Ada / ${newItem.parselNo} Parsel${
-          newItem.bagimsizBolumNo
-            ? ` (Bağımsız Bölüm No: ${newItem.bagimsizBolumNo})`
-            : ""
-        } (${formatAreaM2(newItem.yuzolcumuM2 || 0)} m²) dosyaya eklendi.`
+        newItems.length > 1
+          ? `✓ ${firstNew.adaNo} Ada / ${firstNew.parselNo} Parsel üzerinde ${
+              newItems.length
+            } ayrı Bağımsız Bölüm (No: ${bbTokens.join(", ")}) dosyaya eklendi.`
+          : `✓ ${firstNew.adaNo} Ada / ${firstNew.parselNo} Parsel${
+              firstNew.bagimsizBolumNo
+                ? ` (Bağımsız Bölüm No: ${firstNew.bagimsizBolumNo})`
+                : ""
+            } (${formatAreaM2(firstNew.yuzolcumuM2 || 0)} m²) dosyaya eklendi.`
       );
     } finally {
       setIsQueryingTkgm(false);
@@ -536,7 +571,8 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
             (p) =>
               (p.neighborhood || "") === (item.neighborhood || "") &&
               p.adaNo === item.adaNo &&
-              p.parselNo === item.parselNo
+              p.parselNo === item.parselNo &&
+              (p.bagimsizBolumNo || "") === (item.bagimsizBolumNo || "")
           );
           if (idx >= 0) {
             merged[idx] = item;
@@ -604,38 +640,42 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
     if (subjectType === "tasinmaz" && newParselNo.trim()) {
       const cleanAda = newAdaNo.trim() || "0";
       const cleanParsel = newParselNo.trim();
-      const cleanBb = newBagimsizBolumNo.trim() || undefined;
-      const alreadyExists = finalParcels.some(
-        (p) =>
-          p.adaNo === cleanAda &&
-          p.parselNo === cleanParsel &&
-          (p.bagimsizBolumNo || "") === (cleanBb || "")
-      );
-      if (!alreadyExists) {
-        const parsedArea = Number(String(newYuzolcumu).replace(",", "."));
-        finalParcels.push({
-          id: `${tkgmMahalleId || district}-${cleanAda}-${cleanParsel}${cleanBb ? `-bb${cleanBb}` : ""}`,
-          mahalleId: tkgmMahalleId,
-          neighborhood: neighborhood.trim(),
-          adaNo: cleanAda,
-          parselNo: cleanParsel,
-          bagimsizBolumNo: cleanBb,
-          nitelik: newNitelik.trim() || undefined,
-          yuzolcumuM2:
-            !isNaN(parsedArea) && parsedArea > 0 ? parsedArea : undefined,
-          paftaNo: newPaftaNo.trim() || undefined,
-          mevkii: addressDetail.trim() || undefined,
-          centerLat: lat,
-          centerLng: lng,
-        });
+      const bbTokens = expandBagimsizBolumTokens(newBagimsizBolumNo);
+      const effectiveBbs: (string | undefined)[] =
+        bbTokens.length > 0 ? bbTokens : [undefined];
+      const parsedArea = Number(String(newYuzolcumu).replace(",", "."));
+
+      for (const cleanBb of effectiveBbs) {
+        const alreadyExists = finalParcels.some(
+          (p) =>
+            p.adaNo === cleanAda &&
+            p.parselNo === cleanParsel &&
+            (p.bagimsizBolumNo || "") === (cleanBb || "")
+        );
+        if (!alreadyExists) {
+          finalParcels.push({
+            id: `${tkgmMahalleId || district}-${cleanAda}-${cleanParsel}${
+              cleanBb ? `-bb${cleanBb}` : ""
+            }`,
+            mahalleId: tkgmMahalleId,
+            neighborhood: neighborhood.trim(),
+            adaNo: cleanAda,
+            parselNo: cleanParsel,
+            bagimsizBolumNo: cleanBb,
+            nitelik: newNitelik.trim() || undefined,
+            yuzolcumuM2:
+              !isNaN(parsedArea) && parsedArea > 0 ? parsedArea : undefined,
+            paftaNo: newPaftaNo.trim() || undefined,
+            mevkii: addressDetail.trim() || undefined,
+            centerLat: lat,
+            centerLng: lng,
+          });
+        }
       }
     }
 
     const primaryParcel = finalParcels[0];
-    const totalArea = finalParcels.reduce(
-      (sum, p) => sum + (Number(p.yuzolcumuM2) || 0),
-      0
-    );
+    const totalArea = computeUniqueParcelAreaSum(finalParcels);
 
     // Dosyada birden fazla mahalle varsa tüm mahalleleri birleştirerek kaydet
     const uniqueNeighborhoods =
@@ -1151,15 +1191,9 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
               <div className="space-y-3 rounded-xl border border-amber-300 bg-amber-50/60 p-3.5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="text-xs font-bold text-amber-950">
-                    📐 Dosyadaki Kayıtlı Parseller ({parcels.length} Adet ·
-                    Toplam:{" "}
-                    {formatAreaM2(
-                      parcels.reduce(
-                        (acc, p) => acc + (Number(p.yuzolcumuM2) || 0),
-                        0
-                      )
-                    )}{" "}
-                    m²)
+                    📐 Dosyadaki Kayıtlı Parsel & Bağımsız Bölümler ({parcels.length} Adet ·
+                    Toplam Arsa:{" "}
+                    {formatAreaM2(computeUniqueParcelAreaSum(parcels))} m²)
                   </div>
                   {parcels.length > 0 && (
                     <span className="text-[11px] text-amber-800">
@@ -1304,6 +1338,17 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
                           <div className="flex items-center justify-end gap-1">
                             <button
                               type="button"
+                              onClick={() =>
+                                handleAddAnotherBbToParcelAtIndex(idx)
+                              }
+                              className="inline-flex items-center gap-0.5 rounded border border-indigo-300 bg-indigo-50 px-2 py-1 text-[11px] font-bold text-indigo-900 hover:bg-indigo-100 whitespace-nowrap"
+                              title="Aynı parsel üzerinde yeni bir Bağımsız Bölüm satırı ekle"
+                            >
+                              <Plus className="h-3 w-3" />
+                              <span>B.Bölüm</span>
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => handleRefreshParcelFromTkgm(idx)}
                               disabled={updatingParcelIdx === idx}
                               className="inline-flex items-center gap-1 rounded bg-amber-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-amber-700 disabled:opacity-50 whitespace-nowrap"
@@ -1322,7 +1367,7 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
                               type="button"
                               onClick={() => handleDeleteParcelAtIndex(idx)}
                               className="inline-flex items-center gap-1 rounded border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-100 whitespace-nowrap"
-                              title="Bu parseli dosyadan kaldır"
+                              title="Bu parseli / bağımsız bölümü dosyadan kaldır"
                             >
                               <Trash2 className="h-3 w-3" />
                               <span>Sil</span>
@@ -1407,13 +1452,13 @@ export const EditInspectionModal: React.FC<EditInspectionModalProps> = ({
                     </div>
                     <div>
                       <label className="block text-[10px] font-semibold text-slate-700 mb-0.5">
-                        Bağımsız Bölüm No
+                        Bağımsız Bölüm No (Çoklu: 1, 2, 5)
                       </label>
                       <input
                         type="text"
                         value={newBagimsizBolumNo}
                         onChange={(e) => setNewBagimsizBolumNo(e.target.value)}
-                        placeholder="Örn: 4"
+                        placeholder="Örn: 4 veya 1, 2, 5"
                         className="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs font-mono font-bold text-indigo-900 focus:border-emerald-600 focus:outline-none"
                       />
                     </div>

@@ -1651,7 +1651,64 @@ export async function fetchNearbyTkgmParcels(params: {
 }
 
 /**
- * Kaydın Ada / Parsel ve varsa Bağımsız Bölüm No bilgisini (çoklu parsel desteğiyle) okunaklı etiket olarak döndürür
+ * Kullanıcının Bağımsız Bölüm No kutusuna yazdığı tekil veya çoklu ifadeleri
+ * (Örn: "1, 2, 5", "1-4", "Zemin Kat No:1; Kat 1 No:2" veya "3") ayrı ayrı bağımsız bölüm dizisine çevirir.
+ */
+export function expandBagimsizBolumTokens(rawInput: string | undefined): string[] {
+  if (!rawInput) return [];
+  const trimmed = rawInput.trim();
+  if (!trimmed) return [];
+
+  // Virgül, noktalı virgül veya '+' ile ayrılmış parçaları böl
+  const rawParts = trimmed
+    .split(/[,;+]+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  const expanded: string[] = [];
+  for (const part of rawParts) {
+    // Sadece sayısal aralık ise (Örn: "1-4" veya "2 - 6") genişlet (maksimum 30 adet)
+    const rangeMatch = part.match(/^(\d+)\s*-\s*(\d+)$/);
+    if (rangeMatch) {
+      const start = Number(rangeMatch[1]);
+      const end = Number(rangeMatch[2]);
+      if (start <= end && end - start <= 30) {
+        for (let n = start; n <= end; n++) {
+          const s = String(n);
+          if (!expanded.includes(s)) expanded.push(s);
+        }
+        continue;
+      }
+    }
+    if (!expanded.includes(part)) {
+      expanded.push(part);
+    }
+  }
+  return expanded;
+}
+
+/**
+ * Aynı parsel üzerinde birden fazla bağımsız bölüm eklendiğinde arsa yüzölçümünün (m²)
+ * mükerrer toplanmasını önleyerek benzersiz (mahalle + ada + parsel) bazında toplam yüzölçümünü hesaplar.
+ */
+export function computeUniqueParcelAreaSum(parcels: ParcelItem[] | undefined): number {
+  if (!parcels || parcels.length === 0) return 0;
+  const seenPhysicalParcels = new Set<string>();
+  let sum = 0;
+  for (const p of parcels) {
+    const key = `${(p.neighborhood || "").trim().toLocaleLowerCase("tr-TR")}__${(
+      p.adaNo || "0"
+    ).trim()}__${(p.parselNo || "").trim()}`;
+    if (!seenPhysicalParcels.has(key)) {
+      seenPhysicalParcels.add(key);
+      sum += Number(p.yuzolcumuM2) || 0;
+    }
+  }
+  return Number(sum.toFixed(2));
+}
+
+/**
+ * Kaydın Ada / Parsel ve varsa Bağımsız Bölüm No bilgisini (çoklu parsel ve aynı parselde çoklu bağımsız bölüm desteğiyle) okunaklı etiket olarak döndürür
  */
 export function formatAdaParselLabel(rec: {
   subjectType?: "tasinmaz" | "adres" | "arac";
@@ -1664,8 +1721,29 @@ export function formatAdaParselLabel(rec: {
 }): string | null {
   if (rec.subjectType === "arac" || rec.subjectType === "adres") return null;
   if (rec.parcels && rec.parcels.length > 1) {
+    // Fiziki olarak kaç farklı ada/parsel var kontrol et
+    const uniquePhysicalKeys = new Set(
+      rec.parcels.map(
+        (p) =>
+          `${(p.neighborhood || "").trim()}__${p.adaNo || "0"}__${p.parselNo}`
+      )
+    );
+
+    // Eğer tüm satırlar aynı ada/parsel üzerindeki farklı bağımsız bölümlerse:
+    if (uniquePhysicalKeys.size === 1) {
+      const first = rec.parcels[0];
+      const bbs = rec.parcels
+        .map((p) => p.bagimsizBolumNo?.trim())
+        .filter(Boolean);
+      if (bbs.length > 0) {
+        return `${first.adaNo || "0"} Ada ${first.parselNo} Parsel · ${
+          bbs.length
+        } Bağımsız Bölüm (No: ${bbs.join(", ")})`;
+      }
+    }
+
     const shortList = rec.parcels
-      .slice(0, 3)
+      .slice(0, 4)
       .map((p) => {
         const bb = p.bagimsizBolumNo?.trim()
           ? ` (B.Bölüm: ${p.bagimsizBolumNo.trim()})`
@@ -1674,8 +1752,12 @@ export function formatAdaParselLabel(rec: {
       })
       .join(", ");
     const extra =
-      rec.parcels.length > 3 ? ` +${rec.parcels.length - 3}` : "";
-    return `${rec.parcels.length} Parsel (${shortList}${extra})`;
+      rec.parcels.length > 4 ? ` +${rec.parcels.length - 4}` : "";
+    const countLabel =
+      uniquePhysicalKeys.size !== rec.parcels.length
+        ? `${uniquePhysicalKeys.size} Parsel / ${rec.parcels.length} B.Bölüm`
+        : `${rec.parcels.length} Parsel`;
+    return `${countLabel} (${shortList}${extra})`;
   }
   const singleParcel = rec.parcels?.[0];
   const adaVal = rec.adaNo || singleParcel?.adaNo;
