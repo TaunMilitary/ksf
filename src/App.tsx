@@ -355,6 +355,7 @@ export default function App() {
     }
   });
   const [expandedCardIds, setExpandedCardIds] = useState<Record<string, boolean>>({});
+  const [expandedAgendaDates, setExpandedAgendaDates] = useState<Record<string, boolean>>({});
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [mediaModalRecord, setMediaModalRecord] =
     useState<InspectionRecord | null>(null);
@@ -6074,20 +6075,50 @@ export default function App() {
               <div className="space-y-4">
                 {agendaGroups.map((group) => {
                   const firstWeather = weatherMap[group.records[0]?.id];
+                  const isDayExpanded = Boolean(expandedAgendaDates[group.date]);
                   return (
                     <div
                       key={group.date}
                       className="overflow-hidden app-card"
                     >
-                      {/* Day Group Header (Wrap-friendly on mobile) */}
-                      <div className="flex flex-col gap-2 border-b border-slate-200 bg-[#1B2733] p-3 sm:px-5 sm:py-3.5 text-white sm:flex-row sm:items-center sm:justify-between">
+                      {/* Day Group Header (Clickable Accordion — Default Closed) */}
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={isDayExpanded}
+                        onClick={() =>
+                          setExpandedAgendaDates((prev) => ({
+                            ...prev,
+                            [group.date]: !prev[group.date],
+                          }))
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setExpandedAgendaDates((prev) => ({
+                              ...prev,
+                              [group.date]: !prev[group.date],
+                            }));
+                          }
+                        }}
+                        className={`flex cursor-pointer select-none flex-col gap-2 bg-[#1B2733] p-3 sm:px-5 sm:py-3.5 text-white transition-colors hover:bg-[#243341] sm:flex-row sm:items-center sm:justify-between ${
+                          isDayExpanded ? "border-b border-slate-200" : ""
+                        }`}
+                      >
                         <div className="flex flex-wrap items-center gap-2">
+                          <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-slate-800/90 text-[#63B5B0] shrink-0">
+                            {isDayExpanded ? (
+                              <ChevronUp className="h-4 w-4" />
+                            ) : (
+                              <ChevronDown className="h-4 w-4" />
+                            )}
+                          </span>
                           <CalendarIcon className="h-4 w-4 text-[#63B5B0] shrink-0" />
                           <h2 className="text-xs sm:text-sm font-bold tracking-tight">
                             {formatLongDateTR(group.date)}
                           </h2>
-                          <span className="text-[11px] font-medium text-[#63B5B0]">
-                            ({group.records.length} Dosya)
+                          <span className="rounded-md bg-[#246B73]/30 px-2 py-0.5 text-[11px] font-bold text-[#63B5B0]">
+                            {group.records.length} Keşif
                           </span>
                           {firstWeather && (
                             <span className="inline-flex items-center gap-1 text-[11px] text-slate-200 bg-slate-800/80 rounded px-1.5 py-0.5">
@@ -6098,7 +6129,10 @@ export default function App() {
                           )}
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <div
+                          className="flex flex-wrap items-center gap-2 text-xs"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           <span className="font-mono text-slate-300 text-[11px] tabular-nums">
                             Gidiş-Dönüş: <strong className="text-[#63B5B0]">~{group.totalDailyKm} km</strong>
                           </span>
@@ -6112,12 +6146,14 @@ export default function App() {
                             <span>Güzergahı Paylaş</span>
                           </button>
                           <button
+                            type="button"
                             onClick={() => handleRunPdfExport("daily", group.date)}
                             className="rounded-lg bg-slate-800 px-2.5 py-1 text-[11px] font-semibold text-slate-200 hover:bg-slate-700 whitespace-nowrap"
                           >
                             Günlük PDF
                           </button>
                           <button
+                            type="button"
                             onClick={() => {
                               setMapFilterDate(group.date);
                               setFocusedInspectionId(null);
@@ -6131,7 +6167,8 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* File Rows */}
+                      {/* File Rows (Expanded when date header is clicked) */}
+                      {isDayExpanded && (
                       <div className="divide-y divide-slate-200">
                         {group.records.map((rec, index) => {
                           const wf = weatherMap[rec.id];
@@ -6603,6 +6640,7 @@ export default function App() {
                           );
                         })}
                       </div>
+                      )}
                     </div>
                   );
                 })}
