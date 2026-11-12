@@ -16,7 +16,11 @@ import {
 
 export const STATUS_LABELS: Record<InspectionStatus, string> = {
   planlandi: "Planlandı",
-  yapildi: "Keşif Yapıldı",
+  hazirlik: "Hazırlık Aşamasında",
+  yola_cikildi: "Yola Çıkıldı",
+  kesif_basladi: "Keşif Başladı",
+  yapildi: "Tamamlandı (Yapıldı)",
+  zapt_bekliyor: "Zapt Bekliyor",
   ertelendi: "Ertelendi",
   iptal_edildi: "İptal Edildi",
 };

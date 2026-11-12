@@ -47,12 +47,25 @@ import {
   FileSpreadsheet,
   FileText,
   BarChart3,
+  Bell,
+  Sun,
+  Moon,
+  Mic,
+  Camera,
+  ChevronDown,
+  ChevronUp,
+  AlertTriangle,
+  Download,
+  LayoutDashboard,
 } from "lucide-react";
 import {
   ActiveTab,
+  AppPreferences,
   CloudSyncConfig,
   CourtDistrict,
   CourtUserTitle,
+  FontScalePreference,
+  InspectionAuditEntry,
   InspectionRecord,
   InspectionStatus,
   InspectionSubjectType,
@@ -61,6 +74,7 @@ import {
   PdfExportPeriod,
   RegisteredExpert,
   SmartSuggestion,
+  ThemePreference,
   UserProfileConfig,
   WeatherForecast,
 } from "./types";
@@ -133,6 +147,9 @@ import { MultiRouteAdvisorView } from "./components/MultiRouteAdvisorView";
 import { EditInspectionModal } from "./components/EditInspectionModal";
 import { InspectionMinutesView } from "./components/InspectionMinutesView";
 import { StatisticsDashboardView } from "./components/StatisticsDashboardView";
+import { ControlCenterHomeView } from "./components/ControlCenterHomeView";
+import { FieldMediaNotesModal } from "./components/FieldMediaNotesModal";
+import { AiAssistantModal } from "./components/AiAssistantModal";
 import { DEFAULT_REGISTERED_EXPERTS } from "./services/wordMinutesService";
 import {
   GitHubPublishResult,
@@ -153,6 +170,8 @@ const STORAGE_KEY_USER_PROFILE = "fatsa_adliyesi_user_profile_v1";
 const STORAGE_KEY_AUTH_SESSION = "fatsa_adliyesi_auth_session_v1";
 const STORAGE_KEY_AUTH_REMEMBER = "fatsa_adliyesi_auth_remember_v1";
 const STORAGE_KEY_PUBLISHED_KSF = "fatsa_adliyesi_published_ksf_v1";
+const STORAGE_KEY_APP_PREFS = "fatsa_adliyesi_app_prefs_v1";
+const STORAGE_KEY_READ_NOTIFS = "fatsa_adliyesi_read_notifs_v1";
 const REQUIRED_APP_PASSWORD = "Fatsa2.SHM52";
 
 /**
@@ -251,7 +270,104 @@ export default function App() {
   });
 
   const [isCloudModalOpen, setIsCloudModalOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<ActiveTab>("ajanda");
+  const [activeTab, setActiveTab] = useState<ActiveTab>("ana_sayfa");
+
+  // Uygulama Görünüm, Tema (Açık / Koyu / Sistem) ve Kişiselleştirme Tercihleri
+  const [appPrefs, setAppPrefs] = useState<AppPreferences>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_APP_PREFS);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          themeMode: parsed.themeMode || "light",
+          fontScale: parsed.fontScale || "normal",
+          defaultDistrict: parsed.defaultDistrict || "Tümü",
+          defaultCardCollapsed: Boolean(parsed.defaultCardCollapsed),
+          notificationsEnabled: parsed.notificationsEnabled !== false,
+          hiddenHomeWidgets: Array.isArray(parsed.hiddenHomeWidgets)
+            ? parsed.hiddenHomeWidgets
+            : [],
+        };
+      }
+    } catch {
+      // ignore
+    }
+    return {
+      themeMode: "light",
+      fontScale: "normal",
+      defaultDistrict: "Tümü",
+      defaultCardCollapsed: false,
+      notificationsEnabled: true,
+      hiddenHomeWidgets: [],
+    };
+  });
+
+  const handleUpdateAppPrefs = (patch: Partial<AppPreferences>) => {
+    setAppPrefs((prev) => {
+      const next = { ...prev, ...patch };
+      try {
+        localStorage.setItem(STORAGE_KEY_APP_PREFS, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
+
+  // Tema (Açık / Koyu / Sistem) ve Yazı Boyutu DOM Senkronizasyonu
+  useEffect(() => {
+    const root = document.documentElement;
+    const applyTheme = (mode: ThemePreference) => {
+      const prefersDark =
+        typeof window !== "undefined" &&
+        window.matchMedia &&
+        window.matchMedia("(prefers-color-scheme: dark)").matches;
+      const effectiveDark =
+        mode === "dark" || (mode === "system" && prefersDark);
+      if (effectiveDark) {
+        root.classList.add("dark");
+        root.setAttribute("data-theme", "dark");
+      } else {
+        root.classList.remove("dark");
+        root.setAttribute("data-theme", "light");
+      }
+    };
+
+    applyTheme(appPrefs.themeMode);
+    root.setAttribute("data-font-scale", appPrefs.fontScale || "normal");
+
+    if (appPrefs.themeMode === "system" && window.matchMedia) {
+      const mql = window.matchMedia("(prefers-color-scheme: dark)");
+      const listener = () => applyTheme("system");
+      mql.addEventListener("change", listener);
+      return () => mql.removeEventListener("change", listener);
+    }
+  }, [appPrefs.themeMode, appPrefs.fontScale]);
+
+  // Bildirim Merkezi, Katlanabilir Keşif Kartları, Silme Onayı, Sesli Not/Foto, YZ Asistanı ve Hızlı İşlem Menüsü State
+  const [isNotifOpen, setIsNotifOpen] = useState(false);
+  const [readNotifIds, setReadNotifIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_READ_NOTIFS);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [expandedCardIds, setExpandedCardIds] = useState<Record<string, boolean>>({});
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [mediaModalRecord, setMediaModalRecord] =
+    useState<InspectionRecord | null>(null);
+  const [isAiAssistantOpen, setIsAiAssistantOpen] = useState(false);
+  const [isQuickActionMenuOpen, setIsQuickActionMenuOpen] = useState(false);
+  const [partyNameInput, setPartyNameInput] = useState("");
+  const [duplicateWarningMsg, setDuplicateWarningMsg] = useState<string | null>(
+    null
+  );
+  const [allowDuplicateSubmit, setAllowDuplicateSubmit] = useState(false);
+  const [agendaDateFrom, setAgendaDateFrom] = useState("");
+  const [agendaDateTo, setAgendaDateTo] = useState("");
+  const backupFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Açılış Şifre Koruması ("Fatsa2.SHM52") State
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
@@ -1937,14 +2053,47 @@ export default function App() {
     }
   };
 
-  // Form Submit: Add Inspection (supports Multi-Parcel Taşınmaz OR Vehicle Damage/Delil Tespiti + Creator from Ayarlar)
+  // Form Submit: Add Inspection (supports Multi-Parcel Taşınmaz OR Vehicle Damage/Delil Tespiti + Creator from Ayarlar + Duplicate Detection)
   const handleAddInspection = (e: React.FormEvent) => {
     e.preventDefault();
     if (!esasNo.trim() || !neighborhoodInput.trim() || !date || !time) return;
 
+    // Mükerrer kayıt kontrolü (Esas No, tarih ve konum eşleşmesini kontrol eder; otomatik silme veya birleştirme yapmaz, kullanıcı onayı ister)
+    const cleanEsasCheck = esasNo.trim().toLocaleLowerCase("tr-TR");
+    const existingDuplicate = inspections.find(
+      (r) =>
+        r.status !== "iptal_edildi" &&
+        (r.esasNo.trim().toLocaleLowerCase("tr-TR") === cleanEsasCheck ||
+          (r.date === date &&
+            r.time === time &&
+            r.district === formDistrict &&
+            r.neighborhood.toLocaleLowerCase("tr-TR") ===
+              neighborhoodInput.trim().toLocaleLowerCase("tr-TR")))
+    );
+
+    if (existingDuplicate && !allowDuplicateSubmit) {
+      setDuplicateWarningMsg(
+        `⚠️ Mükerrer Kayıt Uyarısı: "${existingDuplicate.esasNo}" (${existingDuplicate.district} - ${existingDuplicate.neighborhood}, ${formatDateTR(existingDuplicate.date)} ${existingDuplicate.time}) kaydı zaten mevcut. Yine de yeni kayıt olarak eklemek istiyorsanız "Yine de Ekle" butonuna tıklayınız.`
+      );
+      return;
+    }
+
+    setDuplicateWarningMsg(null);
+    setAllowDuplicateSubmit(false);
+
     const finalCreator =
       createdByInput.trim() ||
       formatUserProfileCreator(userProfile, autoDetectedDeviceLabel);
+
+    const initialHistory: InspectionAuditEntry[] = [
+      {
+        id: `hist-${Date.now()}`,
+        timestamp: new Date().toLocaleString("tr-TR"),
+        action: `Keşif kaydı oluşturuldu (Durum: ${STATUS_LABELS[formStatus] || formStatus})`,
+        actor: finalCreator,
+        newStatus: formStatus,
+      },
+    ];
 
     let newRecord: InspectionRecord;
 
@@ -1967,6 +2116,7 @@ export default function App() {
         },
         addressDetail:
           vehicleInspectionPlace.trim() || addressDetail.trim() || undefined,
+        partyName: partyNameInput.trim() || undefined,
         lat: selectedLat,
         lng: selectedLng,
         date,
@@ -1979,6 +2129,7 @@ export default function App() {
         routeGeometry: pickerGeometry,
         corridor: selectedCorridor,
         status: formStatus,
+        historyLog: initialHistory,
         createdBy: finalCreator,
         createdByTitle: userProfile.title,
         deviceType: detectedDeviceType,
@@ -2003,6 +2154,7 @@ export default function App() {
         addressDetail:
           addressDetail.trim() ||
           `${combinedNeighborhoodDisplay} Açık Adres Keşfi`,
+        partyName: partyNameInput.trim() || undefined,
         bagimsizBolumNo: bagimsizBolumNo.trim() || undefined,
         nitelik: nitelik.trim() || undefined,
         lat: selectedLat,
@@ -2019,6 +2171,7 @@ export default function App() {
         routeGeometry: pickerGeometry,
         corridor: selectedCorridor,
         status: formStatus,
+        historyLog: initialHistory,
         createdBy: finalCreator,
         createdByTitle: userProfile.title,
         deviceType: detectedDeviceType,
@@ -2143,6 +2296,7 @@ export default function App() {
             ? finalParcelsList
             : undefined,
         addressDetail: addressDetail.trim() || undefined,
+        partyName: partyNameInput.trim() || undefined,
         lat: primaryParcel?.centerLat || selectedLat,
         lng: primaryParcel?.centerLng || selectedLng,
         date,
@@ -2155,6 +2309,7 @@ export default function App() {
         routeGeometry: pickerGeometry,
         corridor: selectedCorridor,
         status: formStatus,
+        historyLog: initialHistory,
         createdBy: finalCreator,
         createdByTitle: userProfile.title,
         deviceType: detectedDeviceType,
@@ -2188,6 +2343,7 @@ export default function App() {
     setVehicleBrandModel("");
     setVehicleDamageSummary("");
     setAddressDetail("");
+    setPartyNameInput("");
     setCustomExpertText("");
     setNotes("");
     setTime("13:00");
@@ -2216,8 +2372,22 @@ export default function App() {
 
   // Verilmiş (kayıtlı) bir keşfin tüm detaylarını düzenleyip kaydetme
   const handleSaveEditedInspection = (updatedRecord: InspectionRecord) => {
+    const actor = formatUserProfileCreator(userProfile, autoDetectedDeviceLabel);
+    const nextHistory: InspectionAuditEntry[] = [
+      {
+        id: `hist-${Date.now()}`,
+        timestamp: new Date().toLocaleString("tr-TR"),
+        action: `Keşif bilgileri güncellendi (${updatedRecord.esasNo})`,
+        actor,
+      },
+      ...(updatedRecord.historyLog || []),
+    ];
+    const enrichedRecord: InspectionRecord = {
+      ...updatedRecord,
+      historyLog: nextHistory,
+    };
     const updatedList = inspections.map((rec) =>
-      rec.id === updatedRecord.id ? updatedRecord : rec
+      rec.id === enrichedRecord.id ? enrichedRecord : rec
     );
     setInspections(updatedList);
     pushRecordsToCloudIfEnabled(updatedList);
@@ -2265,9 +2435,22 @@ export default function App() {
     const cleanClerk = completionClerkInput.trim() || undefined;
     const cleanBailiff = completionBailiffInput.trim() || undefined;
     const cleanNote = completionNoteInput.trim() || undefined;
+    const actor = formatUserProfileCreator(userProfile, autoDetectedDeviceLabel);
 
     const updated = inspections.map((rec) => {
       if (rec.id !== completingInspection.id) return rec;
+      const prevSt = rec.status || "planlandi";
+      const nextHistory: InspectionAuditEntry[] = [
+        {
+          id: `hist-${Date.now()}`,
+          timestamp: new Date().toLocaleString("tr-TR"),
+          action: `Durum Değişikliği: ${STATUS_LABELS[prevSt] || prevSt} → Tamamlandı (Hakim: ${cleanJudge || "-"}, Katip: ${cleanClerk || "-"}, Mübaşir: ${cleanBailiff || "-"})`,
+          actor,
+          previousStatus: prevSt,
+          newStatus: "yapildi",
+        },
+        ...(rec.historyLog || []),
+      ];
       return {
         ...rec,
         status: "yapildi" as InspectionStatus,
@@ -2275,6 +2458,7 @@ export default function App() {
         clerkName: cleanClerk,
         bailiffName: cleanBailiff,
         statusNote: cleanNote,
+        historyLog: nextHistory,
       };
     });
 
@@ -2310,12 +2494,26 @@ export default function App() {
         return;
       }
     }
+    const actor = formatUserProfileCreator(userProfile, autoDetectedDeviceLabel);
     const updated = inspections.map((rec) => {
       if (rec.id !== id) return rec;
+      const prevSt = rec.status || "planlandi";
+      const nextHistory: InspectionAuditEntry[] = [
+        {
+          id: `hist-${Date.now()}`,
+          timestamp: new Date().toLocaleString("tr-TR"),
+          action: `Durum Değişikliği: ${STATUS_LABELS[prevSt] || prevSt} → ${STATUS_LABELS[newStatus] || newStatus}`,
+          actor,
+          previousStatus: prevSt,
+          newStatus,
+        },
+        ...(rec.historyLog || []),
+      ];
       return {
         ...rec,
         status: newStatus,
         date: newDate || rec.date,
+        historyLog: nextHistory,
       };
     });
     setInspections(updated);
@@ -2326,6 +2524,82 @@ export default function App() {
     const updated = inspections.filter((r) => r.id !== id);
     setInspections(updated);
     pushRecordsToCloudIfEnabled(updated);
+    setConfirmDeleteId(null);
+  };
+
+  const handleDownloadLocalBackup = () => {
+    const payload = {
+      version: "5.5",
+      exportedAt: new Date().toISOString(),
+      court: "T.C. Fatsa 2. Sulh Hukuk Mahkemesi",
+      inspections,
+      registeredExperts,
+      userProfile,
+      appPrefs,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Fatsa_SHM_Kesif_Yedek_${new Date()
+      .toISOString()
+      .slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setFormBannerMessage(
+      `✓ Tüm keşif (${inspections.length} dosya) ve bilirkişi (${registeredExperts.length} uzman) verileriniz JSON yedek dosyası olarak indirildi.`
+    );
+    setTimeout(() => setFormBannerMessage(null), 4500);
+  };
+
+  const handleRestoreLocalBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result || "{}"));
+        const incomingRecords: InspectionRecord[] = Array.isArray(parsed)
+          ? parsed
+          : Array.isArray(parsed.inspections)
+          ? parsed.inspections
+          : Array.isArray(parsed.records)
+          ? parsed.records
+          : [];
+        if (incomingRecords.length > 0) {
+          setInspections((prev) => {
+            const map = new Map<string, InspectionRecord>();
+            for (const item of prev) map.set(item.id, item);
+            for (const inc of incomingRecords) {
+              if (inc && inc.id && !isSampleInspectionRecord(inc)) {
+                map.set(inc.id, enrichLegacyRecord(inc));
+              }
+            }
+            const merged = Array.from(map.values());
+            pushRecordsToCloudIfEnabled(merged);
+            return merged;
+          });
+        }
+        if (Array.isArray(parsed.registeredExperts) && parsed.registeredExperts.length > 0) {
+          handleSaveRegisteredExperts(parsed.registeredExperts);
+        }
+        setFormBannerMessage(
+          `✓ Yedek dosyası başarıyla geri yüklendi ve mevcut kayıtlarınızla veri kaybı olmadan birleştirildi (${incomingRecords.length} kayıt işlendi).`
+        );
+        setTimeout(() => setFormBannerMessage(null), 5000);
+      } catch {
+        setFormBannerMessage(
+          "⚠️ Yüklenen yedek dosyası okunamadı. Lütfen geçerli bir JSON yedek dosyası seçiniz."
+        );
+        setTimeout(() => setFormBannerMessage(null), 4500);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
   };
 
   const handleResetSampleData = () => {
@@ -2428,7 +2702,7 @@ export default function App() {
     };
   }, [mapFilterDate, inspections]);
 
-  // Filtered and chronologically grouped inspections for Agenda View
+  // Filtered and chronologically grouped inspections for Agenda View (Advanced Multi-Field Search & Date Range)
   const filteredInspections = useMemo(() => {
     const q = agendaFilterText.trim().toLocaleLowerCase("tr-TR");
     return inspections.filter((rec) => {
@@ -2442,16 +2716,32 @@ export default function App() {
       const matchesType =
         agendaCaseFilter === "Tümü" || rec.caseType === agendaCaseFilter;
       if (!matchesType) return false;
+      if (agendaDateFrom && rec.date < agendaDateFrom) return false;
+      if (agendaDateTo && rec.date > agendaDateTo) return false;
       if (!q) return true;
       const adaParselStr = `${rec.adaNo || ""} ada ${rec.parselNo || ""} parsel ${
         rec.adaNo || ""
-      }/${rec.parselNo || ""}`.toLocaleLowerCase("tr-TR");
+      }/${rec.parselNo || ""} ${
+        (rec.parcels || [])
+          .map(
+            (p) =>
+              `${p.neighborhood || ""} ${p.adaNo} ada ${p.parselNo} parsel ${p.adaNo}/${p.parselNo} ${p.bagimsizBolumNo || ""}`
+          )
+          .join(" ")
+      }`.toLocaleLowerCase("tr-TR");
+      const dateStrTr = formatDateTR(rec.date).toLocaleLowerCase("tr-TR");
       return (
         rec.esasNo.toLocaleLowerCase("tr-TR").includes(q) ||
         rec.neighborhood.toLocaleLowerCase("tr-TR").includes(q) ||
         rec.district.toLocaleLowerCase("tr-TR").includes(q) ||
         rec.caseType.toLocaleLowerCase("tr-TR").includes(q) ||
         adaParselStr.includes(q) ||
+        dateStrTr.includes(q) ||
+        rec.date.includes(q) ||
+        (rec.partyName && rec.partyName.toLocaleLowerCase("tr-TR").includes(q)) ||
+        (rec.experts && rec.experts.toLocaleLowerCase("tr-TR").includes(q)) ||
+        (rec.judgeName && rec.judgeName.toLocaleLowerCase("tr-TR").includes(q)) ||
+        (rec.clerkName && rec.clerkName.toLocaleLowerCase("tr-TR").includes(q)) ||
         (rec.nitelik && rec.nitelik.toLocaleLowerCase("tr-TR").includes(q)) ||
         (rec.notes && rec.notes.toLocaleLowerCase("tr-TR").includes(q)) ||
         (rec.addressDetail &&
@@ -2464,6 +2754,8 @@ export default function App() {
     agendaFilterText,
     agendaCaseFilter,
     agendaStatusFilter,
+    agendaDateFrom,
+    agendaDateTo,
   ]);
 
   const agendaGroups = useMemo(() => {
@@ -2512,10 +2804,14 @@ export default function App() {
   }, [inspections]);
 
   const statusCounts = useMemo(() => {
-    const counts = {
+    const counts: Record<string, number> = {
       all: inspections.length,
       planlandi: 0,
+      hazirlik: 0,
+      yola_cikildi: 0,
+      kesif_basladi: 0,
       yapildi: 0,
+      zapt_bekliyor: 0,
       ertelendi: 0,
       iptal_edildi: 0,
     };
@@ -2525,6 +2821,158 @@ export default function App() {
     }
     return counts;
   }, [inspections]);
+
+  // Bildirim Merkezi (Bölüm 18): Gerçek kayıtlardan dinamik bildirim üretimi
+  const computedNotifications = useMemo(() => {
+    const list: {
+      id: string;
+      category: string;
+      title: string;
+      desc: string;
+      record?: InspectionRecord;
+      targetTab?: ActiveTab;
+    }[] = [];
+
+    const now = new Date();
+    const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
+      2,
+      "0"
+    )}-${String(now.getDate()).padStart(2, "0")}`;
+
+    // 1. Bugünkü keşifler
+    inspections
+      .filter((r) => r.date === todayIso && r.status !== "iptal_edildi")
+      .forEach((r) => {
+        list.push({
+          id: `notif-today-${r.id}`,
+          category: "Yaklaşan Keşif",
+          title: `Bugün Saat ${r.time}: ${r.esasNo}`,
+          desc: `[${r.district}] ${r.neighborhood} keşfi bugün icra edilecek.`,
+          record: r,
+        });
+      });
+
+    // 2. Zapt bekleyen keşifler
+    inspections
+      .filter(
+        (r) =>
+          r.status === "zapt_bekliyor" ||
+          (r.status === "yapildi" && !r.customMinutesText)
+      )
+      .slice(0, 5)
+      .forEach((r) => {
+        list.push({
+          id: `notif-minutes-${r.id}`,
+          category: "Hazırlanmayı Bekleyen Zapt",
+          title: `${r.esasNo} — Keşif Zaptı Bekliyor`,
+          desc: `[${r.district}] ${r.neighborhood} (${formatDateTR(r.date)}) dosyası için Word keşif zaptı hazırlanabilir.`,
+          record: r,
+          targetTab: "kesif_zapti",
+        });
+      });
+
+    // 3. Ertelenen keşifler
+    inspections
+      .filter((r) => r.status === "ertelendi")
+      .slice(0, 4)
+      .forEach((r) => {
+        list.push({
+          id: `notif-postponed-${r.id}`,
+          category: "Ertelenen Keşif",
+          title: `${r.esasNo} — Ertelenen Dosya`,
+          desc: `[${r.district}] ${r.neighborhood} keşfi ertelendi, yeni gün planlaması bekliyor.`,
+          record: r,
+        });
+      });
+
+    // 4. Eksik bilgi uyarısı
+    inspections
+      .filter(
+        (r) =>
+          r.status !== "iptal_edildi" &&
+          r.subjectType !== "adres" &&
+          r.subjectType !== "arac" &&
+          !r.parselNo &&
+          (!r.parcels || r.parcels.length === 0) &&
+          !r.addressDetail
+      )
+      .slice(0, 3)
+      .forEach((r) => {
+        list.push({
+          id: `notif-missing-${r.id}`,
+          category: "Eksik Keşif Bilgisi",
+          title: `${r.esasNo} — Parsel/Adres Eksik`,
+          desc: `[${r.district}] ${r.neighborhood} kaydında ada/parsel veya açık adres detayı belirtilmemiş.`,
+          record: r,
+        });
+      });
+
+    // 5. Bilirkişi saat çakışması kontrolü
+    const slotMap = new Map<string, InspectionRecord[]>();
+    inspections
+      .filter((r) => r.status !== "iptal_edildi")
+      .forEach((r) => {
+        const key = `${r.date}_${r.time}`;
+        slotMap.set(key, [...(slotMap.get(key) || []), r]);
+      });
+    slotMap.forEach((recs, slotKey) => {
+      if (recs.length >= 2) {
+        const [dStr, tStr] = slotKey.split("_");
+        list.push({
+          id: `notif-conflict-${slotKey}`,
+          category: "Saat / Heyet Çakışması",
+          title: `${formatDateTR(dStr)} Saat ${tStr} Çakışması`,
+          desc: `Aynı tarih ve saatte ${recs.length} farklı dosya (${recs
+            .map((x) => x.esasNo)
+            .join(", ")}) planlanmış.`,
+          record: recs[0],
+        });
+      }
+    });
+
+    // 6. Yedekleme / Senkronizasyon hatırlatması
+    if (inspections.length > 0 && !cloudConfig.lastSyncAt) {
+      list.push({
+        id: "notif-backup-reminder",
+        category: "Yedekleme Hatırlatması",
+        title: "Veri Yedekleme & Bulut Senkronizasyonu",
+        desc: `${inspections.length} keşif kaydınızı Ayarlar bölümünden JSON olarak yedekleyebilir veya Bulut ile eşitleyebilirsiniz.`,
+        targetTab: "ayarlar",
+      });
+    }
+
+    return list;
+  }, [inspections, cloudConfig.lastSyncAt]);
+
+  const unreadNotifCount = useMemo(
+    () =>
+      computedNotifications.filter((n) => !readNotifIds.includes(n.id)).length,
+    [computedNotifications, readNotifIds]
+  );
+
+  const handleToggleNotifRead = (id: string) => {
+    setReadNotifIds((prev) => {
+      const next = prev.includes(id)
+        ? prev.filter((x) => x !== id)
+        : [...prev, id];
+      try {
+        localStorage.setItem(STORAGE_KEY_READ_NOTIFS, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
+
+  const handleMarkAllNotifsRead = () => {
+    const allIds = computedNotifications.map((n) => n.id);
+    setReadNotifIds(allIds);
+    try {
+      localStorage.setItem(STORAGE_KEY_READ_NOTIFS, JSON.stringify(allIds));
+    } catch {
+      // ignore
+    }
+  };
 
   const districtCounts = useMemo(() => {
     return {
@@ -3177,49 +3625,60 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900 pb-16 md:pb-0">
+    <div className="min-h-screen flex flex-col app-surface-bg pb-20 md:pb-0">
       {/* ====================================================================
-          TOP BAR CONTRACT: Responsive 3 Zones
+          TOP BAR CONTRACT: Responsive 3 Zones + Theme Switcher & Notification Center
          ==================================================================== */}
-      <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-slate-800 bg-[#1e293b] px-3.5 py-3 text-white sm:px-6 sm:gap-8">
+      <header className="sticky top-0 z-30 flex items-center justify-between gap-2 border-b border-slate-800 bg-[#101820] px-3 py-2.5 text-white sm:px-5 sm:gap-4">
         {/* Zone 1: Brand Title with district coverage badge */}
         <div className="flex items-center gap-2 truncate">
           <a
             href="#top"
             onClick={(e) => {
               e.preventDefault();
-              setActiveTab("ajanda");
+              setActiveTab("ana_sayfa");
             }}
-            className="text-sm sm:text-base md:text-lg font-bold tracking-tight text-white truncate"
+            className="text-sm sm:text-base font-bold tracking-tight text-white truncate"
           >
             Fatsa, Çamaş & Çatalpınar Keşif
           </a>
-          <span className="hidden lg:inline-block rounded bg-slate-800 px-2 py-0.5 text-[11px] font-medium text-emerald-400">
-            Sulh Hukuk · Ada/Parsel CBS
+          <span className="hidden xl:inline-block rounded bg-[#246B73]/30 border border-[#63B5B0]/30 px-2 py-0.5 text-[11px] font-medium text-[#63B5B0]">
+            Sulh Hukuk · Mobil CBS
           </span>
         </div>
 
         {/* Zone 2: Desktop Navigation Links */}
-        <nav className="hidden md:flex items-center gap-3.5 lg:gap-4 text-xs lg:text-sm font-medium text-slate-300">
+        <nav className="hidden md:flex items-center gap-2.5 lg:gap-3.5 text-xs font-medium text-slate-300 overflow-x-auto">
+          <button
+            onClick={() => setActiveTab("ana_sayfa")}
+            className={`flex items-center gap-1 py-1 transition-colors whitespace-nowrap shrink-0 ${
+              activeTab === "ana_sayfa"
+                ? "text-white font-bold underline decoration-[#63B5B0] decoration-2 underline-offset-8"
+                : "hover:text-white"
+            }`}
+          >
+            <LayoutDashboard className="h-3.5 w-3.5 text-[#63B5B0]" />
+            <span>Ana Sayfa</span>
+          </button>
           <button
             onClick={() => setActiveTab("ajanda")}
             className={`py-1 transition-colors whitespace-nowrap shrink-0 ${
               activeTab === "ajanda"
-                ? "text-white underline decoration-emerald-400 decoration-2 underline-offset-8"
+                ? "text-white font-bold underline decoration-[#63B5B0] decoration-2 underline-offset-8"
                 : "hover:text-white"
             }`}
           >
-            Ajanda Listesi
+            Ajanda ({inspections.length})
           </button>
           <button
             onClick={() => setActiveTab("takvim")}
             className={`py-1 transition-colors whitespace-nowrap shrink-0 ${
               activeTab === "takvim"
-                ? "text-white underline decoration-emerald-400 decoration-2 underline-offset-8"
+                ? "text-white font-bold underline decoration-[#63B5B0] decoration-2 underline-offset-8"
                 : "hover:text-white"
             }`}
           >
-            Aylık Takvim
+            Takvim
           </button>
           <button
             onClick={() => {
@@ -3228,21 +3687,21 @@ export default function App() {
             }}
             className={`py-1 transition-colors whitespace-nowrap shrink-0 ${
               activeTab === "harita"
-                ? "text-white underline decoration-emerald-400 decoration-2 underline-offset-8"
+                ? "text-white font-bold underline decoration-[#63B5B0] decoration-2 underline-offset-8"
                 : "hover:text-white"
             }`}
           >
-            Genel Harita & Parseller
+            Harita & TKGM
           </button>
           <button
             onClick={() => handleOpenNewInspectionTab()}
             className={`py-1 transition-colors whitespace-nowrap shrink-0 ${
               activeTab === "yeni_kesif"
-                ? "text-white underline decoration-emerald-400 decoration-2 underline-offset-8"
+                ? "text-white font-bold underline decoration-[#63B5B0] decoration-2 underline-offset-8"
                 : "hover:text-white"
             }`}
           >
-            Yeni Keşif Ekle
+            + Yeni Keşif
           </button>
           {/* MOR MENÜ: Keşif Zaptı Hazırla */}
           <button
@@ -3258,65 +3717,221 @@ export default function App() {
           </button>
           <button
             onClick={() => setActiveTab("bilirkisiler")}
-            className={`flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition-all whitespace-nowrap shrink-0 ${
+            className={`flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-bold transition-all whitespace-nowrap shrink-0 ${
               activeTab === "bilirkisiler"
                 ? "border-purple-300 bg-purple-600 text-white ring-2 ring-purple-400/40"
                 : "border-purple-500/40 bg-purple-950/70 text-purple-200 hover:bg-purple-800 hover:text-white"
             }`}
           >
             <Users className="h-3.5 w-3.5 text-purple-300" />
-            <span>Bilirkişi Ekle ({registeredExperts.length})</span>
+            <span>Bilirkişiler ({registeredExperts.length})</span>
           </button>
           <button
             onClick={() => setActiveTab("istatistikler")}
-            className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition-all whitespace-nowrap shrink-0 ${
+            className={`flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-xs font-bold transition-all whitespace-nowrap shrink-0 ${
               activeTab === "istatistikler"
-                ? "border-emerald-300 bg-emerald-600 text-white ring-2 ring-emerald-400/40"
+                ? "border-emerald-300 bg-[#246B73] text-white ring-2 ring-emerald-400/40"
                 : "border-emerald-500/40 bg-emerald-950/60 text-emerald-200 hover:bg-emerald-800 hover:text-white"
             }`}
           >
             <BarChart3 className="h-3.5 w-3.5 text-emerald-300" />
-            <span>İstatistik & Grafikler</span>
+            <span>Rapor & İstatistik</span>
           </button>
           <button
             onClick={() => setActiveTab("ai_rota")}
-            className={`flex items-center gap-1.5 py-1 transition-colors whitespace-nowrap shrink-0 ${
-              activeTab === "ai_rota"
-                ? "text-emerald-300 font-bold underline decoration-emerald-400 decoration-2 underline-offset-8"
-                : "text-emerald-300/90 hover:text-white"
-            }`}
-          >
-            <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
-            <span>YZ Rota</span>
-          </button>
-          <button
-            onClick={() => setActiveTab("ayarlar")}
             className={`flex items-center gap-1 py-1 transition-colors whitespace-nowrap shrink-0 ${
-              activeTab === "ayarlar"
-                ? "text-white underline decoration-emerald-400 decoration-2 underline-offset-8"
-                : "hover:text-white"
+              activeTab === "ai_rota"
+                ? "text-[#63B5B0] font-bold underline decoration-[#63B5B0] decoration-2 underline-offset-8"
+                : "text-[#63B5B0] hover:text-white"
             }`}
           >
-            <Settings className="h-3.5 w-3.5 text-emerald-400" />
-            <span>Ayarlar</span>
+            <Route className="h-3.5 w-3.5" />
+            <span>YZ Rota</span>
           </button>
         </nav>
 
-        {/* Zone 3: User Profile Badge + GitHub ksf Pages + Cloud Sync + Lock */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        {/* Zone 3: Theme Switcher + Notification Center + AI Assistant + Sync + Settings + Lock */}
+        <div className="relative flex items-center gap-1.5 shrink-0">
+          {/* YZ Saha Asistanı Butonu */}
+          <button
+            type="button"
+            onClick={() => setIsAiAssistantOpen(true)}
+            className="flex items-center gap-1 rounded-lg border border-[#63B5B0]/40 bg-[#246B73] px-2 py-1.5 text-xs font-bold text-white hover:bg-[#1D575E] transition-colors"
+            title="Doğal Türkçe Yapay Zekâ Saha Asistanını Aç"
+          >
+            <Sparkles className="h-3.5 w-3.5 text-[#63B5B0]" />
+            <span className="hidden lg:inline">Asistan</span>
+          </button>
+
+          {/* Tema Seçici (Açık / Koyu / Sistem) */}
+          <button
+            type="button"
+            onClick={() => {
+              const order: ThemePreference[] = ["light", "dark", "system"];
+              const nextTheme =
+                order[(order.indexOf(appPrefs.themeMode) + 1) % order.length];
+              handleUpdateAppPrefs({ themeMode: nextTheme });
+            }}
+            className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs font-semibold text-slate-200 hover:border-[#63B5B0] hover:text-white transition-colors"
+            title={`Aktif Tema: ${
+              appPrefs.themeMode === "light"
+                ? "Açık Tema"
+                : appPrefs.themeMode === "dark"
+                ? "Koyu Tema"
+                : "Sistem Teması"
+            } (Değiştirmek için tıklayın)`}
+          >
+            {appPrefs.themeMode === "dark" ? (
+              <Moon className="h-3.5 w-3.5 text-[#63B5B0]" />
+            ) : appPrefs.themeMode === "light" ? (
+              <Sun className="h-3.5 w-3.5 text-amber-400" />
+            ) : (
+              <Monitor className="h-3.5 w-3.5 text-sky-400" />
+            )}
+            <span className="hidden xl:inline">
+              {appPrefs.themeMode === "dark"
+                ? "Koyu"
+                : appPrefs.themeMode === "light"
+                ? "Açık"
+                : "Sistem"}
+            </span>
+          </button>
+
+          {/* Bildirim Merkezi Butonu */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setIsNotifOpen((prev) => !prev)}
+              className="relative flex items-center justify-center rounded-lg border border-slate-700 bg-slate-800 p-1.5 text-slate-200 hover:border-[#63B5B0] hover:text-white transition-colors"
+              title="Bildirim Merkezi"
+              aria-label="Bildirim Merkezi"
+            >
+              <Bell className="h-4 w-4" />
+              {unreadNotifCount > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#D9535D] px-1 font-mono text-[10px] font-bold text-white">
+                  {unreadNotifCount}
+                </span>
+              )}
+            </button>
+
+            {isNotifOpen && (
+              <div className="absolute right-0 top-full z-50 mt-2 w-80 sm:w-96 overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-900 shadow-2xl">
+                <div className="flex items-center justify-between border-b border-slate-200 bg-[#1B2733] px-4 py-3 text-white">
+                  <div className="flex items-center gap-2">
+                    <Bell className="h-4 w-4 text-[#63B5B0]" />
+                    <span className="text-xs font-bold">
+                      Bildirim Merkezi ({unreadNotifCount} Okunmamış)
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {computedNotifications.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleMarkAllNotifsRead}
+                        className="text-[11px] font-semibold text-[#63B5B0] hover:underline"
+                      >
+                        Tümünü Okundu İşaretle
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setIsNotifOpen(false)}
+                      className="text-slate-300 hover:text-white"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="max-h-80 overflow-y-auto divide-y divide-slate-200">
+                  {computedNotifications.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-slate-500">
+                      Yeni bildirim bulunmuyor.
+                    </div>
+                  ) : (
+                    computedNotifications.map((nf) => {
+                      const isRead = readNotifIds.includes(nf.id);
+                      return (
+                        <div
+                          key={nf.id}
+                          className={`p-3 text-xs space-y-1 transition-colors ${
+                            isRead ? "bg-white opacity-70" : "bg-slate-50/90"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="rounded bg-[#246B73]/15 px-1.5 py-0.5 text-[10px] font-bold text-[#246B73]">
+                              {nf.category}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleNotifRead(nf.id)}
+                              className="text-[10px] font-semibold text-slate-500 hover:text-slate-900"
+                            >
+                              {isRead ? "Okunmadı İşaretle" : "✓ Okundu"}
+                            </button>
+                          </div>
+                          <div className="font-bold text-slate-900">
+                            {nf.title}
+                          </div>
+                          <p className="text-[11px] text-slate-600">{nf.desc}</p>
+                          <div className="flex items-center gap-2 pt-1">
+                            {nf.record && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleToggleNotifRead(nf.id);
+                                  setIsNotifOpen(false);
+                                  if (nf.targetTab === "kesif_zapti") {
+                                    setPreselectedMinutesRecordId(nf.record!.id);
+                                    setActiveTab("kesif_zapti");
+                                  } else {
+                                    setEditingInspection(nf.record!);
+                                  }
+                                }}
+                                className="rounded bg-[#246B73] px-2.5 py-1 text-[10px] font-bold text-white"
+                              >
+                                {nf.targetTab === "kesif_zapti"
+                                  ? "Zapt Hazırla →"
+                                  : "Dosyaya Git →"}
+                              </button>
+                            )}
+                            {!nf.record && nf.targetTab && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleToggleNotifRead(nf.id);
+                                  setIsNotifOpen(false);
+                                  setActiveTab(nf.targetTab!);
+                                }}
+                                className="rounded bg-[#246B73] px-2.5 py-1 text-[10px] font-bold text-white"
+                              >
+                                Aç &rarr;
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           <button
             type="button"
             onClick={() => setActiveTab("ayarlar")}
-            className="hidden xl:flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/90 px-2.5 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-white transition-colors"
-            title="Kullanıcı Adı ve Unvan Ayarları"
+            className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/90 px-2 py-1.5 text-xs font-medium text-slate-200 hover:border-[#63B5B0] hover:text-white transition-colors"
+            title="Kullanıcı Profili, Tema ve Yedekleme Ayarları"
           >
-            <UserCheck className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-            <span className="truncate max-w-[145px]">
+            <Settings className="h-3.5 w-3.5 text-[#63B5B0] shrink-0" />
+            <span className="hidden xl:inline truncate max-w-[115px]">
               {userProfile.fullName.trim()
-                ? `${userProfile.fullName} (${userProfile.title})`
-                : `${userProfile.title} · Ayarlar`}
+                ? userProfile.fullName
+                : "Ayarlar"}
             </span>
           </button>
+
           <button
             type="button"
             onClick={() => {
@@ -3325,30 +3940,29 @@ export default function App() {
               }
               setIsPublishModalOpen(true);
             }}
-            className="flex items-center gap-1.5 rounded-lg border border-indigo-400/50 bg-indigo-600 px-2.5 py-1.5 sm:px-3 sm:py-2 text-xs font-semibold text-white transition-colors hover:bg-indigo-500 whitespace-nowrap"
+            className="hidden sm:flex items-center gap-1 rounded-lg border border-indigo-400/50 bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-indigo-500 whitespace-nowrap"
             title="Projeyi GitHub Hesabınızdaki 'ksf' Reposunda Yayınla (GitHub Pages)"
           >
             <Globe className="h-3.5 w-3.5 shrink-0" />
-            <span className="hidden sm:inline">GitHub 'ksf' Yayınla</span>
-            <span className="sm:hidden">ksf Yayın</span>
+            <span className="hidden lg:inline">ksf Yayınla</span>
           </button>
+
           <button
             onClick={() => setIsCloudModalOpen(true)}
-            className="flex items-center gap-1.5 rounded-lg bg-[#10b981] px-2.5 py-1.5 sm:px-3.5 sm:py-2 text-xs font-semibold text-slate-950 transition-colors hover:bg-emerald-400 whitespace-nowrap"
+            className="flex items-center gap-1 rounded-lg bg-[#16845B] px-2.5 py-1.5 text-xs font-semibold text-white transition-colors hover:opacity-95 whitespace-nowrap"
             title="Bulut Senkronizasyon (GitHub & Google Apps Script)"
           >
-            <Cloud className="h-4 w-4 shrink-0" />
-            <span className="hidden sm:inline">Bulut Senkronizasyon</span>
-            <span className="sm:hidden">Sync</span>
+            <Cloud className="h-3.5 w-3.5 shrink-0" />
+            <span className="hidden sm:inline">Sync</span>
           </button>
+
           <button
             type="button"
             onClick={handleLockApp}
-            className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 sm:px-2.5 sm:py-2 text-xs font-semibold text-slate-300 hover:border-rose-400 hover:text-rose-300 transition-colors"
+            className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 p-1.5 text-xs font-semibold text-slate-300 hover:border-rose-400 hover:text-rose-300 transition-colors"
             title="Oturumu Kilitle (Şifre Ekranına Dön)"
           >
             <Lock className="h-3.5 w-3.5 shrink-0" />
-            <span className="hidden lg:inline">Kilitle</span>
           </button>
         </div>
       </header>
@@ -3684,6 +4298,48 @@ export default function App() {
           </div>
         )}
 
+        {/* VIEW 0: ANA SAYFA (PROFESYONEL KONTROL MERKEZİ) */}
+        {activeTab === "ana_sayfa" && (
+          <ControlCenterHomeView
+            inspections={inspections}
+            registeredExperts={registeredExperts}
+            weatherMap={weatherMap}
+            selectedDistrict={agendaDistrictFilter as CourtDistrict | "Tümü"}
+            onChangeDistrict={(d: CourtDistrict | "Tümü") =>
+              setAgendaDistrictFilter(d)
+            }
+            onNavigateTab={(tab: ActiveTab) => setActiveTab(tab)}
+            onOpenNewInspection={() => handleOpenNewInspectionTab()}
+            onEditInspection={(rec: InspectionRecord) =>
+              setEditingInspection(rec)
+            }
+            onPrepareMinutesForRecord={(recId: string) => {
+              setPreselectedMinutesRecordId(recId);
+              setActiveTab("kesif_zapti");
+            }}
+            onOpenMediaModalForRecord={(rec: InspectionRecord) =>
+              setMediaModalRecord(rec)
+            }
+            onOpenAiAssistant={() => setIsAiAssistantOpen(true)}
+            onOpenPdfModal={() => setIsPdfModalOpen(true)}
+            onOpenExcelModal={() => setIsExcelModalOpen(true)}
+            onOpenParcelOnMap={(rec: InspectionRecord) =>
+              handleOpenParcelOnOverviewMap(rec)
+            }
+            onCompleteInspection={(rec: InspectionRecord) =>
+              handleOpenCompletionModal(rec)
+            }
+            hiddenWidgets={appPrefs.hiddenHomeWidgets}
+            onToggleWidgetVisibility={(widgetId: string) =>
+              handleUpdateAppPrefs({
+                hiddenHomeWidgets: appPrefs.hiddenHomeWidgets.includes(widgetId)
+                  ? appPrefs.hiddenHomeWidgets.filter((w) => w !== widgetId)
+                  : [...appPrefs.hiddenHomeWidgets, widgetId],
+              })
+            }
+          />
+        )}
+
         {/* VIEW 1: YENİ KEŞİF EKLEME, ADA/PARSEL SINIR SORGULAMA VE HARİTA SEÇİMİ */}
         {activeTab === "yeni_kesif" && (
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-12 items-start">
@@ -3755,12 +4411,62 @@ export default function App() {
                       type="text"
                       required
                       value={esasNo}
-                      onChange={(e) => setEsasNo(e.target.value)}
+                      onChange={(e) => {
+                        setEsasNo(e.target.value);
+                        if (duplicateWarningMsg) setDuplicateWarningMsg(null);
+                      }}
                       placeholder="Örn: 2026/145 E."
                       className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs sm:text-sm font-mono text-slate-900 focus:border-emerald-600 focus:outline-none"
                     />
                   </div>
                 </div>
+
+                {/* Taraf / İlgili Kişi Adı (İsteğe Bağlı) */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-800 mb-1">
+                    Taraf / Davacı - Davalı / İlgili Kişi Adı (İsteğe Bağlı)
+                  </label>
+                  <input
+                    type="text"
+                    value={partyNameInput}
+                    onChange={(e) => setPartyNameInput(e.target.value)}
+                    placeholder="Örn: Davacı Ahmet Yılmaz / Vekili Av. Mehmet Kaya..."
+                    className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-900 focus:border-emerald-600 focus:outline-none"
+                  />
+                </div>
+
+                {/* Mükerrer (Aynı Esas No / Ada-Parsel) Kayıt Uyarısı */}
+                {duplicateWarningMsg && (
+                  <div className="rounded-xl border border-amber-400 bg-amber-50 p-3.5 text-xs text-amber-950 space-y-2">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 text-amber-700 shrink-0 mt-0.5" />
+                      <div>
+                        <div className="font-bold">
+                          Benzer / Mükerrer Keşif Kaydı Tespit Edildi!
+                        </div>
+                        <p className="mt-0.5 text-[11px] text-amber-900">
+                          {duplicateWarningMsg}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <button
+                        type="submit"
+                        onClick={() => setAllowDuplicateSubmit(true)}
+                        className="rounded-lg bg-amber-700 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-amber-800"
+                      >
+                        ✓ Evet, Yine de Yeni Kayıt Olarak Ekle
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDuplicateWarningMsg(null)}
+                        className="rounded-lg px-2 py-1 text-[11px] text-slate-600 hover:underline"
+                      >
+                        Kapat
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Case Type & Status */}
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -5515,10 +6221,52 @@ export default function App() {
                       </option>
                     ))}
                   </select>
+
+                  {/* Tarih Aralığı Filtresi */}
+                  <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px]">
+                    <span className="font-semibold text-slate-500">Tarih:</span>
+                    <input
+                      type="date"
+                      value={agendaDateFrom}
+                      onChange={(e) => setAgendaDateFrom(e.target.value)}
+                      className="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[11px] text-slate-800"
+                      title="Başlangıç Tarihi"
+                    />
+                    <span className="text-slate-400">-</span>
+                    <input
+                      type="date"
+                      value={agendaDateTo}
+                      onChange={(e) => setAgendaDateTo(e.target.value)}
+                      className="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[11px] text-slate-800"
+                      title="Bitiş Tarihi"
+                    />
+                    {(agendaDateFrom || agendaDateTo) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAgendaDateFrom("");
+                          setAgendaDateTo("");
+                        }}
+                        className="ml-0.5 text-slate-400 hover:text-rose-600"
+                        title="Tarih filtresini temizle"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Right Action Buttons */}
                 <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsAiAssistantOpen(true)}
+                    className="flex items-center gap-1.5 rounded-lg bg-[#246B73] px-3 py-1.5 text-xs font-bold text-white hover:opacity-95 whitespace-nowrap shadow-xs"
+                    title="Doğal Türkçe sorgularla keşif asistanına soru sor"
+                  >
+                    <Sparkles className="h-3.5 w-3.5 text-emerald-200" />
+                    <span>YZ Asistan</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => setActiveTab("kesif_zapti")}
@@ -5579,13 +6327,17 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Status Filter Scrollable Bar */}
+              {/* Status Filter Scrollable Bar (8 Durum + Tümü) */}
               <div className="flex items-center gap-1 overflow-x-auto pb-0.5 border-t border-slate-100 pt-2.5">
                 {(
                   [
                     { key: "Tümü", label: `Tümü (${statusCounts.all})` },
                     { key: "planlandi", label: `Planlandı (${statusCounts.planlandi})` },
+                    { key: "hazirlik", label: `Hazırlık (${statusCounts.hazirlik})` },
+                    { key: "yola_cikildi", label: `Yola Çıkıldı (${statusCounts.yola_cikildi})` },
+                    { key: "kesif_basladi", label: `Keşif Başladı (${statusCounts.kesif_basladi})` },
                     { key: "yapildi", label: `Yapıldı (${statusCounts.yapildi})` },
+                    { key: "zapt_bekliyor", label: `Zapt Bekliyor (${statusCounts.zapt_bekliyor})` },
                     { key: "ertelendi", label: `Ertelendi (${statusCounts.ertelendi})` },
                     { key: "iptal_edildi", label: `İptal (${statusCounts.iptal_edildi})` },
                   ] as { key: string; label: string }[]
@@ -5595,7 +6347,7 @@ export default function App() {
                     onClick={() => setAgendaStatusFilter(tab.key)}
                     className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
                       agendaStatusFilter === tab.key
-                        ? "bg-slate-900 text-white"
+                        ? "bg-[#246B73] text-white"
                         : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                     }`}
                   >
@@ -5948,41 +6700,68 @@ export default function App() {
                                 </p>
                               )}
 
-                              {/* Mobile-Friendly Status Action Buttons & Delete */}
+                              {/* Mobile-Friendly Status Action Buttons, Media/Voice & Collapsible Details */}
                               <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100">
-                                <div className="flex flex-wrap items-center gap-1 rounded bg-slate-100 p-0.5">
-                                  {(
-                                    [
-                                      { key: "planlandi", label: "Planlandı" },
-                                      { key: "yapildi", label: "Yapıldı" },
-                                      { key: "ertelendi", label: "Ertelendi" },
-                                      { key: "iptal_edildi", label: "İptal" },
-                                    ] as { key: InspectionStatus; label: string }[]
-                                  ).map((btn) => (
-                                    <button
-                                      key={btn.key}
-                                      type="button"
-                                      onClick={() =>
-                                        handleUpdateInspectionStatus(rec.id, btn.key)
-                                      }
-                                      className={`rounded px-2 py-0.5 text-[11px] font-semibold transition-colors ${
-                                        currentStatus === btn.key
-                                          ? btn.key === "yapildi"
-                                            ? "bg-emerald-600 text-white"
-                                            : btn.key === "ertelendi"
-                                            ? "bg-amber-600 text-white"
-                                            : btn.key === "iptal_edildi"
-                                            ? "bg-red-600 text-white"
-                                            : "bg-white text-slate-900 shadow-xs"
-                                          : "text-slate-600 hover:text-slate-900"
-                                      }`}
-                                    >
-                                      {btn.label}
-                                    </button>
-                                  ))}
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <div className="flex flex-wrap items-center gap-1 rounded bg-slate-100 p-0.5">
+                                    {(
+                                      [
+                                        { key: "planlandi", label: "Planlandı" },
+                                        { key: "yola_cikildi", label: "Yola Çıkıldı" },
+                                        { key: "kesif_basladi", label: "Keşif Başladı" },
+                                        { key: "yapildi", label: "Yapıldı" },
+                                        { key: "zapt_bekliyor", label: "Zapt Bekliyor" },
+                                        { key: "ertelendi", label: "Ertelendi" },
+                                        { key: "iptal_edildi", label: "İptal" },
+                                      ] as { key: InspectionStatus; label: string }[]
+                                    ).map((btn) => (
+                                      <button
+                                        key={btn.key}
+                                        type="button"
+                                        onClick={() =>
+                                          handleUpdateInspectionStatus(rec.id, btn.key)
+                                        }
+                                        className={`rounded px-2 py-0.5 text-[11px] font-semibold transition-colors ${
+                                          currentStatus === btn.key
+                                            ? btn.key === "yapildi"
+                                              ? "bg-emerald-600 text-white"
+                                              : btn.key === "zapt_bekliyor"
+                                              ? "bg-purple-600 text-white"
+                                              : btn.key === "ertelendi"
+                                              ? "bg-amber-600 text-white"
+                                              : btn.key === "iptal_edildi"
+                                              ? "bg-red-600 text-white"
+                                              : "bg-[#246B73] text-white shadow-xs"
+                                            : "text-slate-600 hover:text-slate-900"
+                                        }`}
+                                      >
+                                        {btn.label}
+                                      </button>
+                                    ))}
+                                  </div>
                                 </div>
 
                                 <div className="flex flex-wrap items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => setMediaModalRecord(rec)}
+                                    className="inline-flex items-center gap-1 rounded border border-teal-300 bg-teal-50 px-2.5 py-1 text-[11px] font-bold text-teal-900 hover:bg-teal-100 whitespace-nowrap"
+                                    title="Sesli Not Kaydet, Metne Dönüştür veya Saha Fotoğrafı Ekle"
+                                  >
+                                    <Mic className="h-3 w-3 text-teal-700" />
+                                    <Camera className="h-3 w-3 text-teal-700" />
+                                    <span>
+                                      Saha Not & Foto
+                                      {(rec.voiceNotes?.length || 0) +
+                                        (rec.photos?.length || 0) >
+                                      0
+                                        ? ` (${
+                                            (rec.voiceNotes?.length || 0) +
+                                            (rec.photos?.length || 0)
+                                          })`
+                                        : ""}
+                                    </span>
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -6005,6 +6784,28 @@ export default function App() {
                                     <span>Düzenle</span>
                                   </button>
                                   <button
+                                    type="button"
+                                    onClick={() =>
+                                      setExpandedCardIds((prev) => ({
+                                        ...prev,
+                                        [rec.id]: !prev[rec.id],
+                                      }))
+                                    }
+                                    className="inline-flex items-center gap-1 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 whitespace-nowrap"
+                                  >
+                                    {expandedCardIds[rec.id] ? (
+                                      <>
+                                        <ChevronUp className="h-3 w-3" />
+                                        <span>Detayı Gizle</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <ChevronDown className="h-3 w-3" />
+                                        <span>Detay</span>
+                                      </>
+                                    )}
+                                  </button>
+                                  <button
                                     onClick={() =>
                                       handleOpenNewInspectionTab({
                                         customDate: rec.date,
@@ -6020,15 +6821,96 @@ export default function App() {
                                   >
                                     + Yanına Ekle
                                   </button>
-                                  <button
-                                    onClick={() => handleDeleteInspection(rec.id)}
-                                    className="rounded border border-slate-200 p-1 text-slate-400 hover:text-red-600 hover:bg-red-50"
-                                    title="Sil"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
+                                  {confirmDeleteId === rec.id ? (
+                                    <div className="inline-flex items-center gap-1 rounded border border-rose-300 bg-rose-50 px-2 py-0.5 text-[10px]">
+                                      <span className="font-bold text-rose-900">Silinsin mi?</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          handleDeleteInspection(rec.id);
+                                          setConfirmDeleteId(null);
+                                        }}
+                                        className="rounded bg-rose-600 px-1.5 py-0.5 font-bold text-white hover:bg-rose-700"
+                                      >
+                                        Evet
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setConfirmDeleteId(null)}
+                                        className="rounded bg-white px-1.5 py-0.5 font-semibold text-slate-700"
+                                      >
+                                        İptal
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmDeleteId(rec.id)}
+                                      className="rounded border border-slate-200 p-1 text-slate-400 hover:text-red-600 hover:bg-red-50"
+                                      title="Kaydı Sil (Onay İster)"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  )}
                                 </div>
                               </div>
+
+                              {/* Collapsible Expanded Card Details (Bölüm 7) */}
+                              {expandedCardIds[rec.id] && (
+                                <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50/90 p-3 text-xs space-y-2">
+                                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                                    <div>
+                                      <span className="text-[10px] font-bold uppercase text-slate-400 block">
+                                        Taraf / İlgili Kişi
+                                      </span>
+                                      <span className="font-semibold text-slate-800">
+                                        {rec.partyName || "Belirtilmedi"}
+                                      </span>
+                                    </div>
+                                    <div>
+                                      <span className="text-[10px] font-bold uppercase text-slate-400 block">
+                                        GPS Koordinatları & Koridor
+                                      </span>
+                                      <span className="font-mono text-[11px] text-slate-700">
+                                        {rec.lat.toFixed(5)}, {rec.lng.toFixed(5)} · {rec.corridor}
+                                      </span>
+                                    </div>
+                                    <div>
+                                      <span className="text-[10px] font-bold uppercase text-slate-400 block">
+                                        Saha Medya & Kayıt Özeti
+                                      </span>
+                                      <span className="text-slate-700">
+                                        {rec.voiceNotes?.length || 0} Sesli Not ·{" "}
+                                        {rec.photos?.length || 0} Fotoğraf ·{" "}
+                                        {rec.historyLog?.length || 0} İşlem Kaydı
+                                      </span>
+                                    </div>
+                                  </div>
+                                  {rec.historyLog && rec.historyLog.length > 0 && (
+                                    <div className="border-t border-slate-200 pt-2">
+                                      <span className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
+                                        Son İşlem Geçmişi
+                                      </span>
+                                      <div className="space-y-1">
+                                        {rec.historyLog.slice(0, 3).map((h) => (
+                                          <div
+                                            key={h.id}
+                                            className="flex flex-wrap items-center justify-between text-[11px] text-slate-600"
+                                          >
+                                            <span>
+                                              <strong>{h.action}</strong>
+                                              {h.actor ? ` (${h.actor})` : ""}
+                                            </span>
+                                            <span className="font-mono text-[10px] text-slate-400">
+                                              {h.timestamp}
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -6550,6 +7432,100 @@ export default function App() {
                 </button>
               </div>
 
+              {/* Görünüm, Tema (Açık / Koyu / Sistem) & Yazı Boyutu (Bölüm 4 & 19) */}
+              <div className="border-t border-slate-200 pt-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Sun className="h-4 w-4 text-[#246B73]" />
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Görünüm, Tema & Yazı Boyutu Ayarları
+                  </h3>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {(
+                    [
+                      { id: "light", label: "Açık Tema", icon: <Sun className="h-3.5 w-3.5" /> },
+                      { id: "dark", label: "Koyu Tema", icon: <Moon className="h-3.5 w-3.5" /> },
+                      { id: "system", label: "Sistem Teması", icon: <Monitor className="h-3.5 w-3.5" /> },
+                    ] as { id: ThemePreference; label: string; icon: React.ReactNode }[]
+                  ).map((tm) => (
+                    <button
+                      key={tm.id}
+                      type="button"
+                      onClick={() => handleUpdateAppPrefs({ themeMode: tm.id })}
+                      className={`flex items-center justify-center gap-1.5 rounded-lg border px-2.5 py-2 text-xs font-bold transition-all ${
+                        appPrefs.themeMode === tm.id
+                          ? "border-[#246B73] bg-[#246B73] text-white"
+                          : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                      }`}
+                    >
+                      {tm.icon}
+                      <span>{tm.label}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                    Yazı Boyutu & Yoğunluk:
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(
+                      [
+                        { id: "compact", label: "Kompakt" },
+                        { id: "normal", label: "Standart" },
+                        { id: "large", label: "Büyük (Saha)" },
+                      ] as { id: FontScalePreference; label: string }[]
+                    ).map((fs) => (
+                      <button
+                        key={fs.id}
+                        type="button"
+                        onClick={() => handleUpdateAppPrefs({ fontScale: fs.id })}
+                        className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-all ${
+                          appPrefs.fontScale === fs.id
+                            ? "border-[#246B73] bg-teal-50 text-teal-950 font-bold"
+                            : "border-slate-200 bg-white text-slate-700"
+                        }`}
+                      >
+                        {fs.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Yerel Veri Yedekleme & Geri Yükleme (Bölüm 19 & 21) */}
+              <div className="border-t border-slate-200 pt-4 space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <Download className="h-4 w-4 text-emerald-600" />
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Tam Veri Yedekleme & Geri Yükleme (.JSON)
+                  </h3>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Mevcut tüm keşif kayıtlarını ({inspections.length} dosya), bilirkişi listesini ({registeredExperts.length} uzman) ve profil ayarlarınızı cihazınıza yedekleyebilir veya yedekten geri yükleyebilirsiniz.
+                </p>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={handleDownloadLocalBackup}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#16845B] px-3 py-2 text-xs font-bold text-white hover:opacity-95"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    <span>JSON Yedeği İndir</span>
+                  </button>
+                  <label className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">
+                    <Upload className="h-3.5 w-3.5 text-blue-600" />
+                    <span>Yedekten Geri Yükle</span>
+                    <input
+                      type="file"
+                      accept=".json,application/json"
+                      onChange={handleRestoreLocalBackup}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              </div>
+
               {/* Oturum Güvenliği & Şifre Kilitleme */}
               <div className="border-t border-slate-200 pt-4 flex items-center justify-between gap-2">
                 <div className="text-xs text-slate-600">
@@ -6573,26 +7549,120 @@ export default function App() {
       </main>
 
       {/* ====================================================================
-          FIXED MOBILE BOTTOM NAVIGATION (Taşmayan, Parmakla Erişilebilir Menü)
+          ERGONOMİK 5 BÖLÜMLÜ MOBİL ALT NAVİGASYON + HIZLI İŞLEM MENÜSÜ (BÖLÜM 6)
          ==================================================================== */}
-      <nav className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-around border-t border-slate-200 bg-white/95 py-2 px-2 shadow-lg backdrop-blur-md md:hidden">
+      {isQuickActionMenuOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/60 p-3 backdrop-blur-xs md:hidden"
+          onClick={() => setIsQuickActionMenuOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+              <span className="text-xs font-bold text-slate-900">
+                + Hızlı Saha & Kalem İşlemi Seçin
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsQuickActionMenuOpen(false)}
+                className="rounded-lg p-1 text-slate-400 hover:text-slate-700"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsQuickActionMenuOpen(false);
+                  handleOpenNewInspectionTab();
+                }}
+                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-left text-xs font-bold text-slate-900 hover:border-teal-500"
+              >
+                <Plus className="h-4 w-4 text-[#246B73] shrink-0" />
+                <span>Yeni Keşif Planla</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsQuickActionMenuOpen(false);
+                  setActiveTab("kesif_zapti");
+                }}
+                className="flex items-center gap-2 rounded-xl border border-purple-200 bg-purple-50 p-3 text-left text-xs font-bold text-purple-950"
+              >
+                <FileText className="h-4 w-4 text-purple-700 shrink-0" />
+                <span>Keşif Zaptı Hazırla</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsQuickActionMenuOpen(false);
+                  setActiveTab("bilirkisiler");
+                }}
+                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-left text-xs font-bold text-slate-900"
+              >
+                <Users className="h-4 w-4 text-indigo-600 shrink-0" />
+                <span>Yeni Bilirkişi Kaydı</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsQuickActionMenuOpen(false);
+                  setIsAiAssistantOpen(true);
+                }}
+                className="flex items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 p-3 text-left text-xs font-bold text-teal-950"
+              >
+                <Sparkles className="h-4 w-4 text-[#246B73] shrink-0" />
+                <span>YZ Saha Asistanı</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsQuickActionMenuOpen(false);
+                  setActiveTab("takvim");
+                }}
+                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-left text-xs font-bold text-slate-900"
+              >
+                <CalendarIcon className="h-4 w-4 text-amber-600 shrink-0" />
+                <span>Aylık Takvim</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsQuickActionMenuOpen(false);
+                  setActiveTab("ayarlar");
+                }}
+                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-left text-xs font-bold text-slate-900"
+              >
+                <Settings className="h-4 w-4 text-slate-600 shrink-0" />
+                <span>Ayarlar & Profil</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      <nav className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-around border-t border-slate-200 bg-white/95 py-2 px-1.5 shadow-lg backdrop-blur-md md:hidden">
+        <button
+          onClick={() => setActiveTab("ana_sayfa")}
+          className={`flex flex-col items-center gap-0.5 text-[10px] font-semibold ${
+            activeTab === "ana_sayfa" ? "text-[#246B73] font-bold" : "text-slate-500"
+          }`}
+        >
+          <LayoutDashboard className="h-4 w-4" />
+          <span>Ana Sayfa</span>
+        </button>
         <button
           onClick={() => setActiveTab("ajanda")}
           className={`flex flex-col items-center gap-0.5 text-[10px] font-semibold ${
-            activeTab === "ajanda" ? "text-emerald-700" : "text-slate-500"
+            activeTab === "ajanda" || activeTab === "takvim"
+              ? "text-[#246B73] font-bold"
+              : "text-slate-500"
           }`}
         >
           <ListOrdered className="h-4 w-4" />
           <span>Ajanda</span>
-        </button>
-        <button
-          onClick={() => setActiveTab("takvim")}
-          className={`flex flex-col items-center gap-0.5 text-[10px] font-semibold ${
-            activeTab === "takvim" ? "text-emerald-700" : "text-slate-500"
-          }`}
-        >
-          <CalendarIcon className="h-4 w-4" />
-          <span>Takvim</span>
         </button>
         <button
           onClick={() => {
@@ -6600,49 +7670,38 @@ export default function App() {
             setActiveTab("harita");
           }}
           className={`flex flex-col items-center gap-0.5 text-[10px] font-semibold ${
-            activeTab === "harita" ? "text-emerald-700" : "text-slate-500"
+            activeTab === "harita" ? "text-[#246B73] font-bold" : "text-slate-500"
           }`}
         >
           <MapIcon className="h-4 w-4" />
           <span>Harita</span>
         </button>
         <button
-          onClick={() => handleOpenNewInspectionTab()}
-          className={`flex flex-col items-center gap-0.5 text-[10px] font-semibold ${
-            activeTab === "yeni_kesif" ? "text-emerald-700" : "text-slate-500"
-          }`}
+          onClick={() => setIsQuickActionMenuOpen((v: boolean) => !v)}
+          className="flex flex-col items-center gap-0.5 rounded-xl bg-[#246B73] px-3 py-1 text-[10px] font-bold text-white shadow-sm"
         >
           <Plus className="h-4 w-4" />
-          <span>+ Keşif</span>
+          <span>+ İşlem</span>
         </button>
         <button
           onClick={() => setActiveTab("kesif_zapti")}
-          className={`flex flex-col items-center gap-0.5 text-[10px] font-bold ${
+          className={`flex flex-col items-center gap-0.5 text-[10px] font-semibold ${
             activeTab === "kesif_zapti" || activeTab === "bilirkisiler"
-              ? "text-purple-700"
-              : "text-purple-600"
+              ? "text-purple-700 font-bold"
+              : "text-slate-500"
           }`}
         >
           <FileText className="h-4 w-4" />
-          <span>Zapt Hazırla</span>
+          <span>Keşifler/Zapt</span>
         </button>
         <button
           onClick={() => setActiveTab("istatistikler")}
           className={`flex flex-col items-center gap-0.5 text-[10px] font-semibold ${
-            activeTab === "istatistikler" ? "text-emerald-700" : "text-slate-500"
+            activeTab === "istatistikler" ? "text-[#246B73] font-bold" : "text-slate-500"
           }`}
         >
           <BarChart3 className="h-4 w-4" />
-          <span>İstatistik</span>
-        </button>
-        <button
-          onClick={() => setActiveTab("ayarlar")}
-          className={`flex flex-col items-center gap-0.5 text-[10px] font-semibold ${
-            activeTab === "ayarlar" ? "text-emerald-700" : "text-slate-500"
-          }`}
-        >
-          <Settings className="h-4 w-4" />
-          <span>Ayarlar</span>
+          <span>Raporlar</span>
         </button>
       </nav>
 
@@ -7461,6 +8520,53 @@ export default function App() {
         record={editingInspection}
         onClose={() => setEditingInspection(null)}
         onSave={handleSaveEditedInspection}
+      />
+
+      {/* ====================================================================
+          SAHA SESLİ NOT (DİKTE), FOTOĞRAF ARŞİVİ VE İŞLEM GEÇMİŞİ MODALI (BÖLÜM 14)
+         ==================================================================== */}
+      <FieldMediaNotesModal
+        record={mediaModalRecord}
+        onClose={() => setMediaModalRecord(null)}
+        onSaveUpdatedRecord={(updatedRec: InspectionRecord) => {
+          handleSaveEditedInspection(updatedRec);
+          setMediaModalRecord(updatedRec);
+        }}
+        authorLabel={
+          createdByInput.trim() ||
+          formatUserProfileCreator(userProfile, autoDetectedDeviceLabel)
+        }
+      />
+
+      {/* ====================================================================
+          DOĞAL TÜRKÇE YAPAY ZEKÂ SAHA VE KALEM ASİSTANI MODALI (BÖLÜM 15)
+         ==================================================================== */}
+      <AiAssistantModal
+        isOpen={isAiAssistantOpen}
+        onClose={() => setIsAiAssistantOpen(false)}
+        inspections={inspections}
+        registeredExperts={registeredExperts}
+        onEditInspection={(rec: InspectionRecord) => {
+          setIsAiAssistantOpen(false);
+          setEditingInspection(rec);
+        }}
+        onPrepareMinutesForRecord={(recId: string) => {
+          setIsAiAssistantOpen(false);
+          setPreselectedMinutesRecordId(recId);
+          setActiveTab("kesif_zapti");
+        }}
+        onOpenParcelOnMap={(rec: InspectionRecord) => {
+          setIsAiAssistantOpen(false);
+          handleOpenParcelOnOverviewMap(rec);
+        }}
+        onOpenExcelModal={() => {
+          setIsAiAssistantOpen(false);
+          setIsExcelModalOpen(true);
+        }}
+        onNavigateTab={(tab: ActiveTab) => {
+          setIsAiAssistantOpen(false);
+          setActiveTab(tab);
+        }}
       />
 
       {/* ====================================================================

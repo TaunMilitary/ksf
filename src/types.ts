@@ -25,7 +25,11 @@ export type InspectionType =
 
 export type InspectionStatus =
   | "planlandi"
+  | "hazirlik"
+  | "yola_cikildi"
+  | "kesif_basladi"
   | "yapildi"
+  | "zapt_bekliyor"
   | "iptal_edildi"
   | "ertelendi";
 
@@ -89,6 +93,32 @@ export interface UserProfileConfig {
   includeDeviceName?: boolean; // Keşfi ekleyen bilgisinde cihaz adı da parantez içinde yer alsın mı
 }
 
+export interface InspectionVoiceNote {
+  id: string;
+  transcript: string;
+  audioDataUrl?: string;
+  durationSec?: number;
+  createdAt: string;
+  author?: string;
+}
+
+export interface InspectionPhotoItem {
+  id: string;
+  dataUrl: string;
+  caption: string;
+  takenAt: string;
+  includeInReport?: boolean;
+}
+
+export interface InspectionAuditEntry {
+  id: string;
+  timestamp: string;
+  action: string; // Örn: "Durum Değişikliği: Planlandı -> Tamamlandı"
+  actor?: string;
+  previousStatus?: InspectionStatus;
+  newStatus?: InspectionStatus;
+}
+
 export interface InspectionRecord {
   id: string;
   esasNo: string; // Örn: 2026/145 E.
@@ -107,6 +137,7 @@ export interface InspectionRecord {
   parcels?: ParcelItem[]; // Birden fazla parsel eklendiğinde tüm parsellerin listesi ve poligonları
   vehicleInfo?: VehicleInspectionInfo; // Konu "arac" seçildiğinde plaka, marka/model ve hasar bilgisi
   addressDetail?: string; // Mevki veya ek açıklama
+  partyName?: string; // Taraf / Davacı-Davalı veya İlgili Kişi Bilgisi
   lat: number;
   lng: number;
   date: string; // YYYY-MM-DD
@@ -118,7 +149,7 @@ export interface InspectionRecord {
   durationMin: number; // Tahmini araç sürüş süresi (OSRM)
   routeGeometry?: [number, number][]; // OSRM polyline koordinatları
   corridor?: string; // Güzergah bölgesi
-  status?: InspectionStatus; // planlandi | yapildi | iptal_edildi | ertelendi
+  status?: InspectionStatus; // planlandi | hazirlik | yola_cikildi | kesif_basladi | yapildi | zapt_bekliyor | iptal_edildi | ertelendi
   statusNote?: string; // Erteleme, iptal veya keşif icra notu
   judgeName?: string; // Keşfe katılan Hakim (Örn: "Kadir SAĞLAM")
   judgeSicilNo?: string; // Hakim sicil numarası
@@ -128,6 +159,10 @@ export interface InspectionRecord {
   bailiffSicilNo?: string; // Mübaşir sicil numarası
   assignedExpertIds?: string[]; // Keşif zaptı için seçilen kayıtlı bilirkişi ID'leri
   customMinutesText?: string; // Keşif zaptı özel düzenlenmiş metin (varsa)
+  minutesPreparedAt?: string; // Keşif zaptının hazırlandığı/kaydedildiği tarih
+  voiceNotes?: InspectionVoiceNote[]; // Saha sesli notları ve metin dökümleri
+  photos?: InspectionPhotoItem[]; // Saha fotoğraf arşivi
+  historyLog?: InspectionAuditEntry[]; // Tarih/saat damgalı işlem ve durum geçmişi
   createdBy?: string; // Ayarlardaki kullanıcı adı + unvanı ve/veya bilgisayar/telefon adı
   createdByTitle?: CourtUserTitle | string; // Ekleyen kişinin unvanı
   deviceType?: "pc" | "mobile" | "tablet"; // Ekleyen cihaz türü
@@ -182,7 +217,20 @@ export interface CloudSyncConfig {
   lastSyncAt: string | null;
 }
 
+export type ThemePreference = "light" | "dark" | "system";
+export type FontScalePreference = "normal" | "large" | "compact";
+
+export interface AppPreferences {
+  themeMode: ThemePreference;
+  fontScale: FontScalePreference;
+  defaultDistrict: CourtDistrict | "Tümü";
+  defaultCardCollapsed: boolean;
+  notificationsEnabled: boolean;
+  hiddenHomeWidgets: string[];
+}
+
 export type ActiveTab =
+  | "ana_sayfa"
   | "ajanda"
   | "takvim"
   | "harita"
@@ -194,5 +242,3 @@ export type ActiveTab =
   | "ayarlar";
 
 export type PdfExportPeriod = "daily" | "weekly" | "monthly";
-
-

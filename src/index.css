@@ -1,33 +1,287 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-sans: "Inter", "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
+/* ============================================================================
+   MERKEZİ TASARIM SİSTEMİ & TEMA DEĞİŞKENLERİ (BÖLÜM 3 & 4)
+   Açık Tema (Light) ve Koyu Tema (Dark) Renk Paleti
+   ============================================================================ */
+:root,
+html[data-theme="light"] {
+  --app-bg: #F4F6F8;
+  --app-card: #FFFFFF;
+  --app-surface-2: #EEF2F6;
+  --app-text: #202B38;
+  --app-text-muted: #64748B;
+  --app-primary: #246B73;
+  --app-primary-hover: #1D575E;
+  --app-secondary: #397FA5;
+  --app-border: #E2E8F0;
+  --app-success: #16845B;
+  --app-warning: #D69A35;
+  --app-danger: #D9535D;
+  --app-info: #397FA5;
+  color-scheme: light;
+}
+
+html.dark,
+html[data-theme="dark"] {
+  --app-bg: #101820;
+  --app-card: #1B2733;
+  --app-surface-2: #243341;
+  --app-text: #F1F5F9;
+  --app-text-muted: #A5B2C0;
+  --app-primary: #63B5B0;
+  --app-primary-hover: #4FA39E;
+  --app-secondary: #70A9CB;
+  --app-border: #344454;
+  --app-success: #48B68A;
+  --app-warning: #E7B65C;
+  --app-danger: #EF7880;
+  --app-info: #70A9CB;
+  color-scheme: dark;
+}
+
+html[data-font-scale="large"] {
+  font-size: 107.5%;
+}
+
+html[data-font-scale="compact"] {
+  font-size: 95%;
+}
+
 @layer base {
+  html,
   body {
     font-family: var(--font-sans);
-    color: #0f172a;
-    background-color: #f8fafc;
+    color: var(--app-text);
+    background-color: var(--app-bg);
+    overflow-x: hidden;
+    -webkit-tap-highlight-color: transparent;
   }
 
-  .tabular-nums {
+  .tabular-nums,
+  .font-mono {
     font-variant-numeric: tabular-nums;
   }
 }
 
-/* Custom Leaflet styling for institutional clean look */
+/* ============================================================================
+   MERKEZİ KART, YÜZEY VE BUTON BİLEŞEN SINIFLARI (BÖLÜM 3.3 & 3.4)
+   ============================================================================ */
+.app-surface-bg {
+  background-color: var(--app-bg);
+  color: var(--app-text);
+}
+
+.app-card {
+  background-color: var(--app-card);
+  border: 1px solid var(--app-border);
+  border-radius: 14px;
+  color: var(--app-text);
+  box-shadow: 0 1px 3px 0 rgba(16, 24, 32, 0.04);
+}
+
+.app-btn-primary {
+  background-color: var(--app-primary);
+  color: #ffffff;
+  border-radius: 10px;
+  font-weight: 600;
+  transition: background-color 0.15s ease, transform 0.1s ease;
+}
+.app-btn-primary:hover {
+  background-color: var(--app-primary-hover);
+}
+html.dark .app-btn-primary {
+  color: #101820;
+}
+
+.app-btn-secondary {
+  background-color: var(--app-surface-2);
+  color: var(--app-text);
+  border: 1px solid var(--app-border);
+  border-radius: 10px;
+  font-weight: 600;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+/* ============================================================================
+   KOYU TEMA (DARK MODE) EVRENSEL UYUMLULUK KATMANI
+   Tüm ekranlar, kartlar, grafikler, formlar, modallar ve tablolar için
+   ============================================================================ */
+html.dark body {
+  background-color: #101820 !important;
+  color: #F1F5F9 !important;
+}
+
+html.dark .bg-slate-50,
+html.dark .bg-\[\#F4F6F8\] {
+  background-color: #101820 !important;
+}
+
+html.dark .bg-white,
+html.dark .bg-white\/95,
+html.dark .bg-white\/90 {
+  background-color: #1B2733 !important;
+  color: #F1F5F9;
+}
+
+html.dark .bg-slate-100,
+html.dark .bg-slate-50\/80,
+html.dark .bg-slate-50\/75,
+html.dark .bg-slate-50\/70 {
+  background-color: #243341 !important;
+}
+
+html.dark .text-slate-900,
+html.dark .text-slate-950,
+html.dark .text-\[\#202B38\] {
+  color: #F1F5F9 !important;
+}
+
+html.dark .text-slate-800,
+html.dark .text-slate-700 {
+  color: #E2E8F0 !important;
+}
+
+html.dark .text-slate-600,
+html.dark .text-slate-500,
+html.dark .text-slate-400 {
+  color: #A5B2C0 !important;
+}
+
+html.dark .border-slate-200,
+html.dark .border-slate-300,
+html.dark .border-slate-100,
+html.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #344454 !important;
+}
+
+/* Dark Mode Form Inputs, Selects & Textareas */
+html.dark input:not([type="checkbox"]):not([type="radio"]),
+html.dark select,
+html.dark textarea {
+  background-color: #243341 !important;
+  border-color: #344454 !important;
+  color: #F1F5F9 !important;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #7E90A2 !important;
+}
+
+/* Dark Mode Tinted Status & Accent Surfaces */
+html.dark .bg-emerald-50,
+html.dark .bg-emerald-50\/90,
+html.dark .bg-emerald-50\/80,
+html.dark .bg-emerald-50\/70,
+html.dark .bg-emerald-50\/60,
+html.dark .bg-emerald-100 {
+  background-color: rgba(72, 182, 138, 0.14) !important;
+  border-color: rgba(72, 182, 138, 0.35) !important;
+}
+
+html.dark .text-emerald-950,
+html.dark .text-emerald-900,
+html.dark .text-emerald-800,
+html.dark .text-emerald-700 {
+  color: #63B5B0 !important;
+}
+
+html.dark .bg-amber-50,
+html.dark .bg-amber-50\/90,
+html.dark .bg-amber-50\/80,
+html.dark .bg-amber-50\/70,
+html.dark .bg-amber-50\/55 {
+  background-color: rgba(231, 182, 92, 0.13) !important;
+  border-color: rgba(231, 182, 92, 0.35) !important;
+}
+
+html.dark .text-amber-950,
+html.dark .text-amber-900,
+html.dark .text-amber-800,
+html.dark .text-amber-700 {
+  color: #E7B65C !important;
+}
+
+html.dark .bg-indigo-50,
+html.dark .bg-indigo-50\/80,
+html.dark .bg-indigo-50\/75,
+html.dark .bg-indigo-50\/70,
+html.dark .bg-indigo-50\/55 {
+  background-color: rgba(112, 169, 203, 0.14) !important;
+  border-color: rgba(112, 169, 203, 0.35) !important;
+}
+
+html.dark .text-indigo-950,
+html.dark .text-indigo-900,
+html.dark .text-indigo-800,
+html.dark .text-indigo-700 {
+  color: #70A9CB !important;
+}
+
+html.dark .bg-purple-50,
+html.dark .bg-purple-50\/80,
+html.dark .bg-purple-50\/50 {
+  background-color: rgba(168, 85, 247, 0.15) !important;
+  border-color: rgba(168, 85, 247, 0.35) !important;
+}
+
+html.dark .text-purple-950,
+html.dark .text-purple-900,
+html.dark .text-purple-800,
+html.dark .text-purple-700 {
+  color: #D8B4FE !important;
+}
+
+html.dark .bg-teal-50,
+html.dark .bg-teal-50\/90,
+html.dark .bg-teal-50\/80,
+html.dark .bg-teal-50\/55 {
+  background-color: rgba(99, 181, 176, 0.14) !important;
+  border-color: rgba(99, 181, 176, 0.35) !important;
+}
+
+html.dark .text-teal-950,
+html.dark .text-teal-900,
+html.dark .text-teal-800 {
+  color: #63B5B0 !important;
+}
+
+html.dark .bg-rose-50,
+html.dark .bg-red-50 {
+  background-color: rgba(239, 120, 128, 0.15) !important;
+  border-color: rgba(239, 120, 128, 0.35) !important;
+}
+
+html.dark .text-rose-900,
+html.dark .text-rose-800,
+html.dark .text-red-700 {
+  color: #EF7880 !important;
+}
+
+/* Custom Leaflet styling for institutional clean look (Light & Dark) */
 .leaflet-container {
   font-family: var(--font-sans) !important;
   z-index: 10;
 }
 
 .leaflet-popup-content-wrapper {
-  border-radius: 10px !important;
-  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.14) !important;
-  border: 1px solid #e2e8f0 !important;
+  border-radius: 12px !important;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.16) !important;
+  border: 1px solid var(--app-border) !important;
+  background-color: var(--app-card) !important;
+  color: var(--app-text) !important;
   padding: 2px !important;
+}
+
+.leaflet-popup-tip {
+  background-color: var(--app-card) !important;
 }
 
 .leaflet-popup-content {
@@ -38,4 +292,9 @@
 .custom-div-icon {
   background: transparent;
   border: none;
+}
+
+/* Safe area padding for mobile bottom navigation */
+.pb-safe-bottom {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
 }
